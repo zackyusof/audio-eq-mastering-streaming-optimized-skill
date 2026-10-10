@@ -51,9 +51,9 @@ python3 scripts/lufs_meter.py *.wav
 
 | Mix | Mud 150–400 Hz | Thump 60–150 Hz | Centroid |
 |---|---|---|---|
-| 3 am | 16.6 → 9.5% | intact | 447 → 591 Hz |
-| You Are The One | 28.5 → 17.0% | intact | 395 → 534 Hz |
-| The Conversation | 32.2 → 19.9% | intact | 466 → 681 Hz |
+| Mix A | 16.6 → 9.5% | intact | 447 → 591 Hz |
+| Mix B | 28.5 → 17.0% | intact | 395 → 534 Hz |
+| Mix C | 32.2 → 19.9% | intact | 466 → 681 Hz |
 
 Mastering to −14/−1.0: limiter gain reduction 0–2.4 dB on 8 of 9 (transparent);
 true-peak auto-margin converged on every file.

@@ -248,7 +248,7 @@ if __name__ == "__main__":
 | `default.websearch` fails mid-research | Use SearXNG skill (`web_search.py`) fallback, never stop the task |
 
 ## Source
-Built 2026-10-10 from live analysis of `Hurting.wav` (mem #23650). Validated: mud 47.6→31.6%, centroid 479→727 Hz, 46 overs caught, RMS-matched.
-Hardened same day from `Let Me Hold You (Vocals).wav` + `The Conversation (Vocals).wav` (both full mixes; mem #23652–23661):
+Built 2026-10-10 from live analysis of a 5-minute metal full mix. Validated: mud 47.6→31.6%, centroid 479→727 Hz, 46 overs caught, RMS-matched.
+Hardened same day across 9 further full mixes:
 default-full-mix rule, 10 Hz sub slicing, minimum-phase-only + RMS-match discipline, ~60% reference matching with commercial-master/MP3 caveats.
 Skill-default chain user-validated ("much better") on both mixes with thump fully intact.
