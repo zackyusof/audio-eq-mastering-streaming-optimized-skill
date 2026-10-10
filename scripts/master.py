@@ -46,6 +46,12 @@ def limit_tp(base, sr, tp_t, margin0=1.0):
 
 def main():
     a = sys.argv
+    usage = "usage: master.py <in.wav> <out.wav> [--lufs -14] [--tp -1.0] [processing options]"
+    if len(a) == 2 and a[1] in ("-h", "--help"):
+        print(usage)
+        return
+    if len(a) < 3:
+        sys.exit(usage)
     src, dst = a[1], a[2]
     want = float(a[a.index("--lufs") + 1]) if "--lufs" in a else -14.0
     tp_t = float(a[a.index("--tp") + 1]) if "--tp" in a else -1.0
