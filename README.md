@@ -1,26 +1,29 @@
 # Audio EQ Mastering — Streaming Optimized
 
-Balance any stereo mix with FFT spectrum diagnostics and a validated corrective EQ chain,
-then master it to streaming loudness standards (−14 LUFS / −1.0 dBTP) with a calibrated
-soft-clipper and lookahead brickwall limiter — all from the command line, all reproducible,
-all verified by re-measurement.
+Balance any stereo mix with FFT spectrum diagnostics, then master it to streaming loudness
+standards (−14 LUFS / −1.0 dBTP) through a full modern mastering chain — corrective/linear-phase
+EQ, dynamic EQ, de-ess, harshness taming, M/S, glue compression, clipper, limiter, dither, QC —
+all from the command line, all reproducible, all verified by re-measurement.
 
-Built from a real session: 9 full mixes analyzed, EQ'd, and mastered to −14 LUFS / −1.0 dBTP.
 Originally an [OpenCode](https://opencode.ai) skill (`SKILL.md` included) — the Python scripts
-stand alone anywhere Python runs.
+stand alone anywhere Python runs. **25 scripts**, one entry point (`master.py`).
+
+> This tool **cannot hear.** It outputs numbers and renders; taste calls stay with you.
 
 ## What it does
 
-| Stage | What happens |
+| Group | Modules |
 |---|---|
-| **Analyze** | Averaged-FFT spectrum → energy per band (sub / thump / mud / body / grind / bite / presence / fizz / air), top spectral peaks, centroid, 85% rolloff, crest factor, stereo correlation, mid/side levels, per-section timeline |
-| **EQ balance** | Conservative corrective chain: HPF 28 Hz, +0.8 dB @ 90 Hz, −1.5 dB @ 150 Hz, −3.5 dB @ 270 Hz, +2 dB @ 3.2 kHz, +2.5 dB shelf @ 10.5 kHz — RMS-matched, overs soft-caught, source never touched |
-| **Clip** | Calibrated soft-clipper (0.5–2 dB) shaves transient tops so the limiter idles — requested shave == measured shave |
-| **Limit / master** | Lookahead brickwall limiter with LUFS makeup gain, true-peak auto-margin loop, one residual pass, full before/after report |
+| **Analysis** | `analyze_audio.py` (probe / 9-band spectrum / timeline), `perceived.py` (Fletcher‑Munson / ISO 226 ear-weighted), `anti_alias.py` (aliasing / oversampling diagnostic) |
+| **Tonal** | `eq_demo.py` (minimum-phase corrective EQ), `linear_phase_eq.py` (zero-phase / linear-phase EQ), `dynamic_eq.py` (whole-song dynamic EQ), `ref_match.py` (reference tonal match), `vintage_color.py` (Pultec/tape/tube/transformer colour) |
+| **Dynamics** | `deesser.py`, `harshness.py` (dynamic 2–8 kHz resonance tamer), `glue_comp.py` (bus glue), `multiband.py` (4-band glue), `transient.py` (attack/sustain punch) |
+| **Spatial** | `mid_side.py` (true M/S EQ + width + mono-below), `stereo_tool.py` (mono lows / side-HPF + width + mono check), `translate.py` (low-end translation) |
+| **Level & output** | `limiter.py` (lookahead brickwall), `lufs_meter.py` (BS.1770), `dither.py` (TPDF, CD only), `export_mp3.py` (320k VBR + Xing + ID3v2.3), `xing_header.py` (repair VBR headers) |
+| **QC & repair** | `qc_report.py` (delivery QC + streaming forecast), `codec_check.py` (AAC/MP3 lossy gate), `dehum.py` (DC + mains-hum notch) |
 
 ## Requirements
 
-- Python 3.11+ with `pip install -r requirements.txt` (numpy, scipy, pyloudnorm)
+- Python 3.11+ with `pip install -r requirements.txt` (numpy, scipy, pyloudnorm; `lameenc` + `mutagen` for MP3 export)
 - WAV input (PCM 16/24/32 or Float32). For MP3/M4A, convert first:
   - macOS: `afconvert -f WAVE -d LEI24 in.mp3 tmp.wav`
   - Linux/Windows: `ffmpeg -i in.mp3 -c:a pcm_s24le tmp.wav`
@@ -33,68 +36,119 @@ python3 scripts/analyze_audio.py probe mix.wav
 python3 scripts/analyze_audio.py spectrum mix.wav [skip_seconds]
 python3 scripts/analyze_audio.py timeline mix.wav
 
-# 2. Render a corrective EQ demo (RMS-matched, new file, source untouched)
-python3 scripts/eq_demo.py mix.wav mix_EQdemo.wav
+# 2. Full mastering chain, one command  (EQ → clip → comp → mono → limit → QC)
+python3 scripts/master.py rawmix.wav final.wav --lufs -14 --tp -1.0 \
+  --eq --deess --harsh --dyneq --translate --clip 1.0 --comp --mono 200 --qc
 
-# 3. Master to streaming spec (-14 LUFS-I, -1.0 dBTP ceiling)
-python3 scripts/master.py mix.wav mix_Master14.wav --lufs -14 --tp -1.0
+# 3. Master with linear-phase EQ + M/S + transient shaping + de-hum
+python3 scripts/master.py mix.wav out.wav --lufs -14 --tp -1.0 \
+  --dehum 50 --lpeq --transient 2 --mono 120 --qc
 
-# 4. Full chain in one go: EQ + soft-clip + master
-python3 scripts/master.py rawmix.wav final.wav --eq --clip 1.0 --lufs -14 --tp -1.0
+# 4. Delivery QC report (LRA, PSR, correlation, streaming forecast, PASS/FAIL)
+python3 scripts/qc_report.py out.wav --target -14 --tp -1.0
 
-# 5. Meter anything
+# 5. Lossy-codec gate (true-peak rise + overs after AAC/MP3)
+python3 scripts/codec_check.py out.wav --aac 256 --mp3 320
+
+# 6. House MP3 + metering
+python3 scripts/export_mp3.py out.wav out.mp3 --album "My Album"
 python3 scripts/lufs_meter.py *.wav
 ```
 
+## The mastering chain (`master.py`)
+
+Order (doctrine: repair first, clipper before limiter, dither last):
+
+```
+[dehum] → [deess → harshness] → [corrective EQ | linear-phase EQ] → [dyneq] → [translate]
+        → [ref-match] → [multiband]/[glue] → [color] → [transient] → mono-lows/width
+        → clipper → limiter → verify → [dither16] → [MP3] → [QC]
+```
+
+```bash
+python3 scripts/master.py <in.wav> <out.wav> --lufs -14 --tp -1.0 \
+  [--dehum 50] [--eq | --lpeq] [--deess] [--harsh] [--dyneq] [--translate] \
+  [--ref REF.wav --refamt 0.6] [--multiband] [--comp] \
+  [--color pultec|tape15|tube|transformer] [--transient 3] \
+  [--mono 200 --width 1.1 | --sidehpf 90] [--clip N] [--dither16] [--qc]
+```
+
+Key defaults:
+
+| Stage | Default |
+|---|---|
+| Corrective EQ | HPF 28, +0.8 @90 / −1.5 @150 / −3.5 @270 / +2 @3.2k / +2.5 shelf @10.5k |
+| Linear-phase EQ | same curve, zero-phase (constant group delay), for low-end correction |
+| Clipper | soft-clip shave 0.5–2 dB (requested == measured), before makeup |
+| Glue comp | 2.5:1, 30 ms / 250 ms, target ~1.5 dB GR |
+| Multiband | 4-band 1.6/1.5/1.2/1.1, ~1 dB/band |
+| Mono lows | LR4 highpass on the side < 200 Hz (or `--sidehpf 90` for a gentler slope) |
+| Limiter | lookahead brickwall, ceiling −1.0 dBTP, true-peak auto-margin loop, 1 residual LUFS pass |
+
+## Delivery QC (`qc_report.py`, `codec_check.py`)
+
+`qc_report.py` is the end-of-chain check (Insight‑2 class): integrated LUFS, **LRA** (EBU R128,
+relative-gated), short-term profile, **PSR**, true peak, PLR/crest, stereo correlation
+min/avg/max, mono-compatibility loss, M/S balance, DC offset, noise floor, a **per-platform
+streaming-normalization forecast** (Spotify/YouTube/Tidal/Amazon/Deezer/Apple — the gain each
+applies and whether it is peak-limited), and PASS/FAIL against a target (`--json` for machines).
+
+`codec_check.py` is the "lossy check": encode AAC/MP3, decode, re-measure — loud/clipped masters
+rise most after encoding, so it **fails on any sample overs**.
+
+## Anti-aliasing (measured)
+
+Oversampling is mandatory only for the **ADC/SRC anti-alias filter** (physics). For DSP it is
+conditional, and the discriminator is **waveshaper vs time-varying gain** — not "nonlinear vs
+linear". Measured on the bundled chain (6.2 kHz sine, +6 dB, 44.1 kHz): a tanh clipper goes
+**1× −28.2 → 2× −66.6 → 4× −87.6 dB** (plateau at 4×); a hard clipper keeps paying to 16×; the
+dynamics stages do **not** alias (glue comp out-of-band −154.8 dB, identical at every ratio).
+So oversample the clipper / saturation / low-band tube when they work on bright material — skip
+it on every dynamics/EQ stage. Measure any stage with `anti_alias.py`.
+
 ## Real session results
 
-9 mixes, skill-default chain, RMS-matched throughout:
+A 4-album, 43-track batch through the skill-default chain, RMS-matched throughout:
 
-| Mix | Mud 150–400 Hz | Thump 60–150 Hz | Centroid |
-|---|---|---|---|
-| Mix A | 16.6 → 9.5% | intact | 447 → 591 Hz |
-| Mix B | 28.5 → 17.0% | intact | 395 → 534 Hz |
-| Mix C | 32.2 → 19.9% | intact | 466 → 681 Hz |
-
-Mastering to −14/−1.0: limiter gain reduction 0–2.4 dB on 8 of 9 (transparent);
-true-peak auto-margin converged on every file.
+- All masters landed **−14.0…−14.5 LUFS-I, TP ≤ −1.07 dBTP**, limiter GR ≤ 3.3 dB (transparent).
+- Corrective EQ: mud 150–400 Hz typically 16–32 % → 9–20 %, centroid lifted toward 400–800 Hz.
+- `diagnose → render → re-measure` on every file; true-peak auto-margin converged on all.
 
 ## How it works
 
 - **Spectrum:** Hanning-windowed 32k rFFT, power averaged over the track (~every 4th window),
-  integrated into 9 musical bands. Fast: ~1 min per 5-minute song.
-- **EQ:** minimum-phase biquads (RBJ cookbook) + Butterworth HPF — like real analog EQ.
-  Zero-phase filtering was tried and rejected (inflated peaks to 1.26).
-- **Loudness:** `pyloudnorm` (validated BS.1770) is the standard meter; the bundled
-  `lufs_meter.py` (exact K-weighting @48 kHz) is the fallback.
-- **Limiter:** peak detection with 5 ms lookahead (`maximum_filter1d`), release-only gain
-  smoothing at control rate, tanh safety above 0.95, hard ceiling 0.99.
-- **True peak:** measured 4× oversampled; the limiter auto-widens its ceiling margin until
-  measured TP is in spec (max 3 passes), then one residual LUFS pass, then it stops.
+  integrated into 9 musical bands. ~1 min per 5-minute song.
+- **EQ:** minimum-phase biquads (RBJ cookbook) by default; `linear_phase_eq.py` applies the same
+  curve as an **exact zero-phase magnitude** (padded FFT) when phase matters.
+- **Dynamic EQ:** whole-song 2 s ticks vs the song's own median — corrects per-section, not
+  per-average (cuts-only, smoothed, no pumping).
+- **Loudness:** `pyloudnorm` (validated BS.1770) is the standard meter; bundled `lufs_meter.py`
+  (exact K-weighting @48 kHz) is the fallback and powers LRA/PSR.
+- **Limiter:** peak detection with 5 ms lookahead, release-only gain smoothing at control rate,
+  tanh safety above 0.95; true peak measured 4× oversampled with an auto-widening ceiling margin.
 
 ## Doctrine (the short version)
 
 - Files are **full mixes by default** — never analyze as stems unless told.
-- **Low cuts are guilty until proven innocent:** slice sub-bass into 10 Hz bands before
-  recommending any high-pass; never imply content exists below measured data.
+- **Low cuts are guilty until proven innocent**: slice sub-bass into 10 Hz bands before any HPF.
 - **Cut before boosting, mirror don't stack** (kick *or* bass owns each low band, never both).
-- **Reference matching:** apply ~60% of measured band deltas, caps ±2.5 dB; never chase a
-  mastered reference's lows or an MP3's top octave; tonal balance only, never loudness.
+- **Reference matching:** ~60% of measured band deltas, caps ±2.5 dB; tonal balance only, never loudness.
 - **Physics wall:** under a brickwall, +1 dB makeup returns ~+0.3 LUFS while GR climbs ~+2 dB.
   Report shortfalls plainly — never promise distortion-free loud.
+- **Back up before any re-render; prove a fix with a before/after measurement, never "looks right."**
 
 ## Limitations (honest)
 
-- This tool **cannot hear**. It outputs numbers and renders; taste calls stay with you.
-- True-peak meter is 4×-approximate, not a certified meter; keep 0.2–0.3 dB extra margin for picky distributors.
-- Minimum-phase EQ only; no linear-phase, multiband, glue compression, or stereo imaging stages.
+- This tool cannot hear — it outputs numbers and renders; taste calls stay with you.
+- True-peak meter is 4×-approximate, not a certified meter; keep 0.2–0.3 dB extra margin.
+- No stem separation / source rebalancing; no neural (IRC-style) limiter algorithms.
 - Validated on rock/metal full mixes. Other genres: same workflow, different target numbers.
 
 ## As an OpenCode skill
 
 Drop this repo (or symlink it) at `~/.config/opencode/skills/audio-analysis/` — `SKILL.md`
-contains the full agent operating contract (regime, 6-step workflow, troubleshooting).
-Rebuild the skill index after adding: `python3 ~/.config/opencode/scripts/build_toc.py`.
+contains the full agent operating contract (regime, workflow, troubleshooting). Rebuild the
+skill index after adding: `python3 ~/.config/opencode/scripts/build_toc.py`.
 
 ## License
 

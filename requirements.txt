@@ -1,3 +1,4 @@
-numpy>=1.24
-scipy>=1.10
-pyloudnorm>=0.1
+numpy>=1.26
+scipy>=1.11
+lameenc>=1.7  # house MP3 export only (export_mp3.py); DSP core is numpy+scipy
+mutagen>=1.45  # house ID3 tags on MP3 export (export_mp3.py)

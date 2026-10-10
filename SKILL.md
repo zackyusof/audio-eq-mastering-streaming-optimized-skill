@@ -26,7 +26,7 @@ You are the audio frequency analyst for this task — a focused specialist, not 
 - macOS `afinfo` / `afconvert` for format probe + compressed-to-WAV conversion
 - Python stdlib `wave` + `numpy` + `scipy` (NO librosa/matplotlib/ffmpeg — do not assume them; `pip install` only if the task needs spectrogram images)
 - 24-bit WAV: parse manually via `wave` + int64 assembly (see script). Float32 WAV: `scipy.io.wavfile.read`
-- Scripts live in this skill dir: `scripts/analyze_audio.py`, `scripts/eq_demo.py`
+- Scripts live in this skill dir: `scripts/analyze_audio.py`, `scripts/eq_demo.py`, `scripts/anti_alias.py` (alias diagnostic), `scripts/linear_phase_eq.py`, `scripts/mid_side.py`, `scripts/qc_report.py`, `scripts/codec_check.py`, `scripts/dehum.py`, `scripts/transient.py`
 
 ## Workflow (MUST, in order)
 
@@ -74,8 +74,33 @@ not raw level, are what reads as "heavy" after normalization.
 Toolchain (ONE entry point, same on every agent/host):
 - `pip install pyloudnorm` — the standard BS.1770 meter. Built-in `lufs_meter.py` is fallback only
   (validated: reads ~0.5 LU lower than pyloudnorm — never mix the two in one report).
-- `scripts/master.py <in> <out> --lufs <t> --tp <t> [--eq]` — measure → makeup → limit → verify.
-  `--eq` applies the skill-default EQ chain first (for raw mixes; skip if already EQ'd).
+- `scripts/master.py <in> <out> --lufs <t> --tp <t> [flags]` — full chain: deess+harsh → eq → dyneq → translate → ref → multiband/comp → color → mono → clip → makeup → limit → verify → dither.
+  `--eq` skill-default EQ (raw mixes only); `--clip N` soft-clip pre-makeup; `--deess` split-shelf 7kHz/2.5dB first-insert;
+  `--harsh` dynamic resonance tamer (2-8kHz, top-3 peaks prom≥8dB, range 2dB/peak total cap 4dB, skips clean material);
+  `--dyneq` whole-song dynamic EQ (2s ticks vs song-median target, cuts-only cap 2dB, 3-tick smoothing, filter-bank gains — fixes sections, never the average; sub/thump excluded); `--translate` low-end translation (three zones: sub felt / body 60-200 heard-everywhere / 200-500 harmonics;
+  sub>12% -> broad trim cap 2dB @45Hz + always lite parallel tube ghost 60-250Hz mix 0.25 for psychoacoustic bass;
+  balanced tracks pass through; per-channel, RMS-match); `--clip N` pre-limiter transient shave (~1dB limGR per 0.5 clip);
+  escalation: limGR >4 after clip 1.0 → clip 1.5 → max 2.0; if still >4.5, physics wall — ship + report shortfall
+  plainly, offer a −15 LUFS breathing variant (a dense track: 5.7→5.1→4.7 across clip 1.0/1.5/2.0); `--ref REF.wav --refamt 0.6` tonal deltas ~60% cap ±2.5dB (sub-cap -1dB, MP3-top-octave + mud~=ref skips; tonal only, RMS kept);
+  `--multiband` 4-band glue (1.6/1.5/1.2/1.1, ~1dB/band); `--comp` bus glue 2.5:1/30ms/250ms target 1.5dB;
+  `--color pultec|tape15|tube|transformer` vintage box drive 0.5 mix 0.5 parallel; `--mono F` + `--width` (1.0 = off);
+  `--sidehpf 90` gentler alternative to `--mono` (HPFs side channel only, keeps 90–200 Hz width);
+  `--dither16` TPDF 2LSB int16, LAST, CD only.
+  Standalone `dynamic_eq.py` (--tick 2.0 --cap 2.0 --csv ticks.csv; validated gated synth: mud/bite cuts track sections, verse +0.2dB, RMS identical).
+  Standalone `translate.py` (validated: 23.5%sub->18.7% trim -1.72dB RMS-identical; balanced 6.7%->6.7% pass-through).
+  Standalones: `deesser.py`, `glue_comp.py` (warns >3dB), `stereo_tool.py` (mono-LR4 or side-HPF mode, warns corr<0.3), `dither.py`,
+  `vintage_color.py` (--flavor --drive 0-1 --mix), `multiband.py`, `ref_match.py` (--amount 0.6 --maxdb 2.5), `harshness.py` (--zone --peaks 3 --range 2.0 --prom 8),
+  `export_mp3.py` — house MP3: 48kHz / 320k-ceiling VBR (q0, avg ~250k reported) / 16-bit stereo
+  (`pip install lameenc`; afconvert MPG3 encode unavailable on macOS 27 — AAC path works, MP3 does not).
+  **lameenc writes NO Xing/Info VBR header** (verified every setting) → players/parsers assume CBR from the
+  first frame bitrate and show bogus durations (a 4:47 track as 39 min). `export_mp3.py` now injects a
+  standard Xing frame (frames|bytes|TOC) losslessly after encode; `xing_header.py <file.mp3> [...]` repairs
+  already-delivered files in place (no re-encode, `.bak` kept). ALWAYS verify duration after export.
+  House ID3v2.3 defaults on every export (mutagen, UTF-8): Title = filename minus extension,
+  Artist = the configured artist, Album = source dir name (`--album` overrides; skips generic `mp3/mastered/out` dirs),
+  Year = current year verified live at runtime, AlbumArtist + Composer = the configured artist.
+  Missing-field rule: empty title/album with no override = exit non-zero naming the field — ask the user,
+  never ship untagged. Retag mode: `export_mp3.py <existing.mp3>` (no re-encode).
   TP auto-margin loop converges measured TP into spec (max 3 passes); ONE residual makeup pass, then STOP.
 - Physics wall (do not chase past it): under a brickwall each +1 dB makeup returns ~+0.3 LUFS while GR
   climbs ~+2 dB. Landing −9 from a dynamic mix costs ~9 dB GR (sausage). Report the shortfall plainly.
@@ -88,10 +113,141 @@ Order: gain stage (peaks −6..−3 in) → corrective EQ (HPF 20–30, mud −1
 - Clipper BEFORE limiter, always: shave 0.5–2 dB transients so the limiter works less (pro: StandardCLIP,
   KClip 3, Newfangled Saturate; ours: `soft_clip()` in limiter.py — threshold solved so measured shave
   == requested; `--clip N` in master.py runs it pre-makeup so gain math holds).
+- Glue/stereo/dither (built 2026-10-10, validated synthetic): `glue_comp.py` 1.64dB on 1.5 target;
+  `stereo_tool.py` mono<200 LR4 + width 1.15, monoloss +0.00dB, corr warn <0.3; `dither.py` TPDF int16 out.
+  Full-chain synth: LUFS -14.0 TP -7.06 GR -0.0dB; CD dither path int16 verified.
+- Vintage color + multiband + ref (built 2026-10-10: MusicRadar vintage survey, Unison ref doctrine, MusicGuy 4-band glue):
+  `vintage_color.py` 4 flavors (pultec low-trick boost+cut 60Hz + air / tape15 18k damp + sat / tube asymmetric 2nd-harmonic / transformer iron),
+  all RMS-matched peak 0.99; `multiband.py` ~1dB/band on music synth; `ref_match.py` caps enforced (±2.5, sub -1, skips verified).
+  Full 8-stage chain synth: LUFS -15.6 TP -1.15 GR 8.7 (stacked-synth sausage, honestly reported).
+  Lesson: never reuse `want` as a loop var in master.py — it shadows target LUFS (bug 2026-10-10, fixed → `delta`).
+- Harshness (built 2026-10-10: BabyAudio/Soothe, MousePlugins/Harshmallow, CryoMix 2-5kHz doctrine — harshness≠sibilance):
+  gated-resonance synth: 3100+4300Hz found exact, ON-windows cut -1.4dB / OFF untouched ±0.2dB, RMS bit-identical, score halved;
+  white-noise control stays busy by design (noise IS resonances — Soothe behaves the same).
+- Ceiling discipline (bug 2026-10-10, caught by harshness validation): every script normalized output UP to 0.99
+  (`out * 0.99/peak`), silently breaking RMS-match whenever source peaked below 0.99. Fixed all 8 scripts to
+  ceiling-only (`if peak > 0.99`). Delivered 9 masters UNAFFECTED (master.py chain was always ceiling-correct).
 - Deliverables: 24-bit WAV, −14 LUFS-I / −1 dBTP (covers Spotify/YouTube/Tidal/Amazon; Apple −16 needs no
-  separate file). Dither ONLY when reducing to 16-bit CD. Always A/B against a LEVEL-MATCHED reference.
+  separate file). File convention (house rule 2026-10-10): ORIGINAL filenames kept, subdir disambiguates —
+  `<project>/mastered/<name>.wav` + `<project>/mp3/<name>.mp3` (house MP3 via `export_mp3.py`), never a
+  `_master` suffix. Dither ONLY when reducing to 16-bit CD. Always A/B against a LEVEL-MATCHED reference.
 - Five classic failures: limiter-only loudness (6 dB+ GR), no reference, over-widening (mono collapse),
   boosting instead of cutting, untreated room before plugin shopping.
+
+### 5d. Fletcher-Munson / equal loudness (added 2026-10-10: Fletcher-Munson 1933 -> Robinson-Dadson 1956 -> ISO 226:2003, ed. 2023 equivalent; iZotope + Tonalux doctrine)
+The ear is not a flat mic: ~3-4kHz ear-canal resonance = peak sensitivity (exactly our harshness zone);
+lows/highs need far more SPL when quiet; contours flatten with level (85dB SPL studio ref, 83 film).
+- `scripts/perceived.py <file>` — ANALYSIS ONLY: raw shares vs A-weighted (~40-phon/quiet ear, IEC exact)
+  vs C-weighted (~100-phon/loud ear, exact). A-vs-C delta per band = translation forecast (big delta =
+  balance moves with the listener's volume knob). Validated: Conversation master thump 49% raw -> 2% quiet-ear.
+- Discipline: calibrated monitoring level; low-volume check 50-60dB (bass really there?); reference at
+  70/80/90dB SPL. NEVER build inverse-EQ curves from contours (averaged lab data, not your ears — iZotope).
+  K-weighting (LUFS/pyloudnorm) already covers broadcast-level loudness; A/C covers the quiet/loud ends.
+
+### 5e. Tests + requirements (added 2026-10-10, external review feedback)
+`tests/test_lufs_meter.py` (5 tests: gain-tracking, silence, 4x TP ±0.5 dB, stereo +3 dB, <40 Hz HPF) +
+`tests/test_limiter_true_peak.py` (5 tests: 4x-measured ceiling, transparency, GR, soft-clip shave + 0.99 cap).
+Run: `python3 tests/test_*.py` (stdlib unittest, no pytest). `requirements.txt`: numpy/scipy (+lameenc for MP3 only).
+
+### 5f. Multi-album batches (learned 2026-10-10, 33-track parallel run: mix 9 + BOD 11 + Vol.1 11 + Vol.2 11)
+- One background agent per album, identical flags, per-album LOG; agent must do the work DIRECTLY —
+  forbid nested backgrounding (2/3 agents ducked out into inner runners and "completed" with nothing done).
+- Watcher fallback: own-session shell loop every 2 min on `mastered/*.wav + mp3/*.mp3` counts == source counts,
+  90-min timeout with partial-state report; its exit is the completion ping. Then verify per-track table from
+  logs (LUFS/TP/limGR/compGR/harsh/translate/mp3avg, zero nonzero-rc) + tag readback + **duration check
+  (mp3 == src, see 5g)** + freshness mtimes.
+- Typical yields: harsh fires ~20% of tracks (real +8dB outliers only), translate trims only sub>12% tracks,
+  limGR ≤3.8 except dense-wall tracks (see clip escalation). Album tags: Title=file, Album=src dir, Year=live.
+
+### 5g. Duration integrity — MANDATORY gate (added 2026-10-10, from 43 MP3s shipped with wrong lengths)
+Never ship an MP3 whose *reported* length is wrong. lameenc emits **no Xing/Info VBR header**, so players
+and parsers assume CBR from the first frame's bitrate and show garbage durations (e.g. 4:48 track as ~39 min)
+— the audio is fine, only the length metadata is wrong. Rules:
+- `export_mp3.py` injects a Xing frame after encode **and hard-gates**: it re-reads the tagged MP3 and
+  `sys.exit`s (deleting the file) if `|MP3 reported duration − source duration| > 0.5 s`. NEVER bypass.
+- Repair already-delivered files **losslessly, no re-encode**: `python3 scripts/xing_header.py <file.mp3> [...]`
+  (keeps a `.bak`). Idempotent — skips files that already have a header.
+- VERIFY every export: `mutagen` `MP3(dst).info.length` must equal the source WAV length. Ground truth for an
+  MP3's true length is a **frame scan** (`frames × 1152 / sr` for MPEG-1 Layer III @48k) — `afinfo`
+  mis-estimates VBR and must not be trusted for duration.
+- Album gate: `src wav count == mastered count == mp3 count` AND every `mp3 duration == src duration`.
+
+### 5h. Anti-aliasing / oversampling — is it mandatory? (researched 2026-10-10: Tonalux, Gazillion, Wojcik-measured, Julius O. Smith)
+Two different things share the name — do not conflate them:
+- **ADC / SRC anti-alias filter (AAF):** MANDATORY, physics. Every converter and rate-change lowpasses below
+  Nyquist; a signal above fs/2 that isn't filtered folds back as an inharmonic alias. Not optional, ever.
+- **Oversampling a nonlinear DSP stage:** CONDITIONAL, *not* mandatory. It only helps where a nonlinearity
+  generates harmonics above Nyquist that fold. Linear processes fold nothing and gain zero from it.
+
+The split is **waveshapers vs time-varying gain** — not "nonlinear vs linear". A time-varying gain (any dynamics
+process) is technically nonlinear, but its gain envelope only changes at Hz–tens-of-Hz rates, so it only creates
+intermodulation sidebands that *hug each partial* — they never reach Nyquist and never fold. Only a *waveshaper*
+(harmonics at integer multiples, racing past Nyquist) aliases.
+
+| our stage | aliases? | oversample? |
+|---|---|---|
+| **waveshapers:** `soft_clip` / master `--clip N`, `vintage_color` (`--color`, tube/tape/transformer), `translate` low-band tube sat | YES | yes when doing real work on bright material |
+| **time-varying gain (all dynamics):** `glue_comp` / `--comp`, `multiband`, `dynamic_eq`, `deesser`, `harshness` | NO | skip — pure CPU waste |
+| **linear:** `eq_demo` EQ, `stereo_tool`, `dither`, `ref_match` gain, `limit()` brickwall | NO | skip |
+
+`glue_comp` is a pure feedforward RMS→soft-knee gain, no internal saturation → no alias. It only becomes an alias
+concern if a compressor carries an analog-modeled *gain cell* / internal saturation (SSL-style, tube/opto bus
+comps) — ours does not.
+
+Measured on OUR chain (`anti_alias.py`, 6.2 kHz sine +6 dB, 44.1 kHz, non-harmonic rel. total):
+- tanh clipper thr=1.0: **1× −28.2 → 2× −66.6 → 4× −87.6 → 8× −87.8 dB** (+60 dB; ceiling reached at 4×)
+- hard clipper (`clip`): 1× −25.5 → 8× −63.0 dB (still improving — hard corners keep paying to 16×)
+- our gentle `soft_clip` @2 dB shave: 1× −48.0 → 2× −103.7 → 4× −105.5 dB (already −48 at 1× = mild by design)
+- 110 Hz source: no measurable alias at any ratio → "kick safe, hi-hat not". Crossover ≈1–3 kHz source.
+- `glue_comp` out-of-band (15–22 kHz energy, 1–14 kHz chirp, 6 dB GR): **slow 30/250 ms −154.8 dB, fast 1/10 ms
+  −98.7 dB** — vs a tanh clipper on the same chirp at **−16.5 dB**. Confirms dynamics do not fold.
+
+Rules: **4× default**, 8× when a hard clipper does real work, 16× only for hard corners. Enable on bright
+material / full mix / master bus; skip on bass or kick alone. Drive is the real alias control — a lower `--clip`
+shave means less fold. Offline rendering has no monitoring-latency downside, so OS costs only CPU (~2–4×) —
+worth it. **Brighten AFTER clipping, never before** (a pre-clipper high shelf feeds the clipper its worst material).
+Two nonlinear stages in series each fold the previous one's output.
+GAP (open, waveshapers only): the three waveshaper stages run at native rate (no internal OS); the dynamics
+stages do not need it. `anti_alias.py` verifies any stage empirically; wrap a waveshaper core in
+`resample_poly(x,4,1) → process → resample_poly(...,1,4)` when it does real work on bright content. Not
+mandatory at our gentle 0.5–2 dB shaves (measured −48 dB already).
+
+`scripts/anti_alias.py [--stage clipper|hardclip|softclip] [--f0 6200] [--drive 6] [--shave 2.0] [--ratios 1,2,4,8]`
+— the industry "sine test": reports folded-energy dB per oversampling ratio so "is AA needed here?" is a number, not a vibe.
+
+### 5i. Modern-chain coverage — modules added 2026-10-10 (gap audit vs Ozone 12 + the 2026 mastering checklist)
+Audited the chain against Ozone 12's module set (EQ / Dynamic EQ / Dynamics / Maximizer / Imager / Low End
+Focus / Stabilizer / Clarity / Master Rebalance / Vintage suite) and the SessionFlow 2026 mastering checklist.
+Already covered: EQ, dynamic EQ, de-ess, harshness (Clarity), multiband, glue comp, clipper, limiter, Imager-lite,
+Vintage colour, ref-match, translate (Low-End-Focus-lite), dither, MP3 export. Built the missing stages:
+- `linear_phase_eq.py` — zero-phase (linear-phase) EQ via padded FFT: EXACT magnitude (verified +5.95 dB on a
+  +6 target), constant group delay, no phase smear — the standard mastering EQ mode for low-end correction
+  (Ozone "Linear Phase"). Minimum-phase `eq_demo` stays the colouration default.
+- `mid_side.py` — true M/S EQ: independent mid (centre: vocal/kick) and side (image) biquad chains + width +
+  mono-below. Ozone's EQ/Dynamics/Imager all offer M/S; this is the routing.
+- `qc_report.py` — Insight-2-class delivery QC: integrated LUFS, LRA (EBU R128, relative-gated), short-term
+  profile, PSR, true peak, PLR/crest, correlation min/avg/max, mono-compat loss, M/S balance, DC, noise floor,
+  per-platform streaming-normalization forecast, PASS/FAIL vs a target (`--json` for machines).
+- `codec_check.py` — lossy gate: AAC (afconvert) / MP3 (lameenc) round-trip → TP rise + sample overs. Loud/clipped
+  masters rise most after encoding; gate on overs.
+- `dehum.py` — repair: DC removal + 50/60 Hz mains-hum notch chain (Q ~10-20 = 50/Q Hz bandwidth; higher Q too narrow).
+- `transient.py` — transient shaper (attack/sustain) = the punch control Ozone splits into Low End Focus; run before the limiter.
+Wired into `master.py`: `--dehum 50`, `--lpeq` (linear-phase default EQ), `--transient A`, `--qc` (end-of-chain report).
+Two latent bugs found during the audit and fixed (both real, both silent):
+- `multiband.py` gain ride `wet / Σbands` spiked when a band sum ≈0 in quiet gaps, then RMS-match crushed the whole
+  track (peak +46 dB pre-limit before the fix). Fixed: absolute floor + ±6 dB ride cap (mirrored in master.py).
+- `stereo_tool.py` / `mid_side.py` mono-below used `side − lowpass(side)`; a minimum-phase lowpass has phase lag,
+  so the subtraction BOOSTED the transition ~+3 dB instead of removing lows (measured +2.5 dB @ 80 Hz). Fixed:
+  apply an LR4 **highpass** to the side directly.
+Intentionally NOT covered (say so, never fake): Master Rebalance (stem separation), Stabilizer, neural/IRC-style
+limiter algorithms — out of scope for an offline numpy/scipy chain.
+Blast radius + re-render (2026-10-10, same day): the mono-below phase bug had SHIPPED in every master of a
+4-album, 43-track batch — the buggy filter made bass ~7–10 dB too WIDE
+(side <300 Hz measured). All 43 re-rendered with the fixed LR4 highpass (canonical chain `--eq --deess --harsh
+--dyneq --translate --clip 1.0 --comp --mono 200`), MP3s re-exported with exact per-album tags preserved;
+verified 43/43 in spec (−14.0..−14.5 LUFS, TP ≤ −1.07 dBTP, MP3 durations ok). Pre-fix backup kept at
+`<project>/.pre-mono-fix-backup-20261010`. Re-render discipline: recover the batch flags from the opencode log
+("spawning process"), BACK UP FIRST, and prove the fix with a before/after band measurement — never trust "looks right".
 
 ### 6. Persist
 Log one `action` memory entry (file, key numbers, demo path). Report concisely: table + fix list, no superlatives.
@@ -246,9 +402,26 @@ if __name__ == "__main__":
 | Demo quieter than source | RMS-match step skipped — never ship without it; louder always sounds "better" |
 | Reference-matching overshoots | Apply ~60% of measured band deltas, caps ±2.5 dB. NEVER match a mastered ref's lows blindly (commercial masters scoop sub); NEVER chase top octave of an MP3 ref (codec-compromised); match tonal balance only, never loudness. If ref mud ≈ mix mud, skip the mud cut entirely |
 | `default.websearch` fails mid-research | Use SearXNG skill (`web_search.py`) fallback, never stop the task |
+| MP3 Album tag ≠ siblings after a project-folder rename | `export_mp3.py` derives Album from the source's parent dir; if the project dir was renamed mid-project (e.g. a project dir renamed mid-project), READ a sibling tag first and pass `--album "<exact sibling value>"` — never trust the current folder name |
+| Album reported N/N but source has MORE tracks | Before declaring an album done assert `src wav count == mastered wav count == mp3 count`; a track added after the batch is silently missed (BOD logged 11/11 with a 12th source present). Recover the batch's exact flags from `~/.local/share/opencode/log/opencode.log` ("spawning process") and reuse them verbatim for a consistent sibling |
+| Metallic/gritty ring over bright hats, cymbals, sibilance or a full mix after clipping/saturation | alias fold (see 5h) — measure with `anti_alias.py --stage <clipper\|hardclip\|softclip>`; lower the drive (`--clip` shave) and/or oversample the nonlinear core ×4; if brightening, do it AFTER the clipper |
+| Full master blows up (huge TP, RMS collapsed) after `--multiband` on material with quiet gaps | multiband gain ride spiked on a near-zero band sum — fixed 2026-10-10 (floor + ±6 dB cap). If it recurs, lower the multiband target GR |
+| "Mono below F" sounds boomy/wide instead of tight | old bug: `side − lowpass(side)` boosts lows (~+3 dB, phase lag). Fixed 2026-10-10 to an LR4 highpass on the side |
+| MP3 duration shown wrong (e.g. 4:47 track reads 39 min) | lameenc emits NO Xing/Info VBR header → parsers assume CBR from the first frame bitrate. Fix: `xing_header.py <file.mp3> [...]` injects a standard Xing frame losslessly (no re-encode); `export_mp3.py` now does this automatically. Confirm with `mutagen` (`MP3(p).info.length`) — it equals the source WAV when correct. `afinfo` mis-estimates VBR too, so scan frames (frames × 1152/sr) as the ground truth |
 
 ## Source
-Built 2026-10-10 from live analysis of a 5-minute metal full mix. Validated: mud 47.6→31.6%, centroid 479→727 Hz, 46 overs caught, RMS-matched.
-Hardened same day across 9 further full mixes:
+Built 2026-10-10 from live analysis of `Hurting.wav` (mem #23650). Validated: mud 47.6→31.6%, centroid 479→727 Hz, 46 overs caught, RMS-matched.
+Hardened same day from two full-mix vocal files (mem #23652–23661):
 default-full-mix rule, 10 Hz sub slicing, minimum-phase-only + RMS-match discipline, ~60% reference matching with commercial-master/MP3 caveats.
 Skill-default chain user-validated ("much better") on both mixes with thump fully intact.
+Hardened 2026-10-10 (post-delivery audit): 5g duration-integrity gate + `xing_header.py` — lameenc emits no
+VBR header, so all 43 delivered MP3s reported wrong lengths; repaired losslessly, export now self-verifies (mem #23709/#23710).
+Extended 2026-10-10 (chain gap audit vs Ozone 12 + 2026 checklist): 6 new modules — `linear_phase_eq.py`,
+`mid_side.py`, `qc_report.py`, `codec_check.py`, `dehum.py`, `transient.py` — wired into master.py
+(`--dehum/--lpeq/--transient/--qc`) + 5i section; two latent bugs fixed (multiband gain spike, mono-below
+phase trick). mem #23717–#23719.
+Extended 2026-10-10: 5h anti-aliasing/oversampling research + `anti_alias.py` diagnostic — the "is AA mandatory?"
+question is conditional, measured on our own chain (mem #23712). Corrected same day: the discriminator is
+**waveshapers vs time-varying gain**, not "nonlinear vs linear" — dynamics (`glue_comp`/`multiband`/`dynamic_eq`/
+`deesser`/`harshness`) do NOT alias (glue_comp measured −154.8 dB out-of-band); only `soft_clip`, `vintage_color`
+and the `translate` low-band tube sat do (mem #23716).

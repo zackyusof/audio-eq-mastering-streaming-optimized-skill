@@ -38,7 +38,8 @@ def main(src, dst):
     th = 0.95
     m = np.abs(out) > th  # soft-knee catch transients only
     out[m] = np.sign(out[m]) * (th + (1 - th) * np.tanh((np.abs(out[m]) - th) / (1 - th)))
-    out = (out * 0.99 / max(np.abs(out).max(), 1e-9)).astype(np.float32)
+    pk = float(np.abs(out).max())
+    out = (out * 0.99 / pk).astype(np.float32) if pk > 0.99 else out.astype(np.float32)  # ceiling-only: never scale UP (would break RMS-match)
     wavfile.write(dst, sr, out)
     print(f"wrote {dst} rms={float(np.sqrt((out**2).mean())):.4f} peak={float(np.abs(out).max()):.3f}")
 
