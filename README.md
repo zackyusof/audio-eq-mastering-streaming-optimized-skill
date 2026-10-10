@@ -6,7 +6,7 @@ EQ, dynamic EQ, de-ess, harshness taming, M/S, glue compression, clipper, limite
 all from the command line, all reproducible, all verified by re-measurement.
 
 Originally an [OpenCode](https://opencode.ai) skill (`SKILL.md` included) — the Python scripts
-stand alone anywhere Python runs. **25 scripts**, one entry point (`master.py`).
+stand alone anywhere Python runs. **27 scripts**, one entry point (`master.py`).
 
 > This tool **cannot hear.** It outputs numbers and renders; taste calls stay with you.
 
@@ -14,12 +14,12 @@ stand alone anywhere Python runs. **25 scripts**, one entry point (`master.py`).
 
 | Group | Modules |
 |---|---|
-| **Analysis** | `analyze_audio.py` (probe / 9-band spectrum / timeline), `perceived.py` (Fletcher‑Munson / ISO 226 ear-weighted), `anti_alias.py` (aliasing / oversampling diagnostic) |
+| **Analysis** | `analyze_audio.py` (probe / 9-band spectrum / timeline), `stem_space.py` (aligned-stem overlap and chosen EQ/pan), `perceived.py` (Fletcher‑Munson / ISO 226 ear-weighted), `anti_alias.py` (aliasing / oversampling diagnostic) |
 | **Tonal** | `eq_demo.py` (minimum-phase corrective EQ), `linear_phase_eq.py` (zero-phase / linear-phase EQ), `dynamic_eq.py` (whole-song dynamic EQ), `ref_match.py` (reference tonal match), `vintage_color.py` (Pultec/tape/tube/transformer colour) |
 | **Dynamics** | `deesser.py`, `harshness.py` (dynamic 2–8 kHz resonance tamer), `glue_comp.py` (bus glue), `multiband.py` (4-band glue), `transient.py` (attack/sustain punch) |
 | **Spatial** | `mid_side.py` (true M/S EQ + width + mono-below), `stereo_tool.py` (mono lows / side-HPF + width + mono check), `translate.py` (low-end translation) |
 | **Level & output** | `limiter.py` (lookahead brickwall), `lufs_meter.py` (BS.1770), `dither.py` (TPDF, CD only), `export_mp3.py` (320k VBR + Xing + ID3v2.3), `xing_header.py` (repair VBR headers) |
-| **QC & repair** | `qc_report.py` (delivery QC + streaming forecast), `codec_check.py` (AAC/MP3 lossy gate), `dehum.py` (DC + mains-hum notch) |
+| **QC & repair** | `qc_report.py` (delivery QC + streaming forecast), `codec_check.py` (AAC/MP3 lossy gate), `dehum.py` (DC + mains-hum notch), `spectral_repair.py` (short clicks/pops and bounded peak smoothing) |
 
 ## Requirements
 
@@ -97,6 +97,42 @@ python3 scripts/codec_check.py out.wav --aac 256 --mp3 320
 python3 scripts/export_mp3.py out.wav out.mp3 --album "My Album"
 python3 scripts/lufs_meter.py *.wav
 ```
+
+## Choose optional processing before rendering
+
+For a new song or batch, choose any additional stages **before** changing audio. An agent using
+`SKILL.md` asks once about repair, tone, dynamics/color, space, and delivery. If you choose no
+extras, it runs the existing preset: `--lufs -14 --tp -1.0 --eq --deess --harsh --dyneq
+--translate --clip 1.0 --comp --mono 200` with QC. The new stages below stay off by default.
+
+| If you need... | Explicit option | Important limit |
+|---|---|---|
+| Short clicks or pops | `master.py --declick` | Isolated defects up to 2 ms; inspect before/after. Longer crackle or clipping needs a different repair. |
+| Gentler narrow spectral peaks | `master.py --spectral-smooth 1.5` | Attenuation only, above 500 Hz, capped at 3 dB. It can dull useful harmonics. |
+| More overall stereo width | `master.py --width 1.1` | Affects the whole mix, not individual instruments; check mono compatibility. |
+| Room between instruments | `stem_space.py analyze` then `render` | Needs aligned original stems. Choose the lower-priority stem and EQ/pan move; verify in the full mix. |
+| Source extraction from a finished mix | External model such as [Demucs](https://github.com/facebookresearch/demucs) | Optional separate install/download; estimated stems can bleed and are not the original multitrack. |
+
+Examples (run from the repository root; create the destination directories first):
+
+```bash
+# Repair and smooth a source mix before mastering it, or use the same flags on master.py.
+python3 scripts/spectral_repair.py "../My Album/Track 01.wav" "../My Album/Track 01 repaired.wav" \
+  --declick --smooth-db 1.5
+python3 scripts/master.py "../My Album/Track 01.wav" "../My Album/mastered/Track 01.wav" \
+  --lufs -14 --tp -1.0 --eq --deess --harsh --dyneq --translate --clip 1.0 \
+  --comp --mono 200 --declick --spectral-smooth 1.5 --qc
+
+# With original aligned stems, find collision bands; then render one chosen stem move.
+python3 scripts/stem_space.py analyze "../My Album/stems/Vocal.wav" "../My Album/stems/Guitar.wav"
+python3 scripts/stem_space.py render "../My Album/stems/Guitar.wav" "../My Album/stems/Guitar space.wav" \
+  --cut-hz 2500 --cut-db 1.5 --q 0.9
+```
+
+Recombine the processed stem with the other stems in your DAW. `stem_space.py` reports possible
+masking from simultaneous band energy; its score is not a listening verdict or a neural
+source-separation metric. See [the research notes](references/spectral-space-research.md) for
+the GitHub projects and method limits.
 
 ## The mastering chain (`master.py`)
 

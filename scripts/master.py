@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """One entry point for mastering: [deess+harsh] -> [EQ] -> [dyneq] -> [translate] -> [ref] -> [multiband/comp] -> [color] -> [mono] -> clip -> makeup -> limit -> verify -> [dither16].
-Usage: master.py <in.wav> <out.wav> --lufs -14 --tp -1.0 [--dehum 50] [--eq | --lpeq] [--clip N] [--deess] [--harsh] [--dyneq] [--translate] [--ref REF.wav --refamt 0.6] [--multiband] [--comp] [--color pultec|tape15|tube|transformer] [--transient A] [--mono 200 --width 1.1 | --sidehpf 90] [--dither16] [--qc]
+Usage: master.py <in.wav> <out.wav> --lufs -14 --tp -1.0 [--declick] [--spectral-smooth 1.5] [--dehum 50] [--eq | --lpeq] [--clip N] [--deess] [--harsh] [--dyneq] [--translate] [--ref REF.wav --refamt 0.6] [--multiband] [--comp] [--color pultec|tape15|tube|transformer] [--transient A] [--mono 200 --width 1.1 | --sidehpf 90] [--dither16] [--qc]
 Chain order = doctrine (deess+harsh first, translation before dynamics, clipper before limiter, dither last, 16-bit only).
 Standard meter: pyloudnorm (fallback: built-in lufs_meter, reads ~0.5 LU lower)."""
 import os
@@ -74,8 +74,22 @@ def main():
     do_lpeq = "--lpeq" in a
     transient_a = float(a[a.index("--transient") + 1]) if "--transient" in a else None
     do_qc = "--qc" in a
+    do_declick = "--declick" in a
+    smooth_db = float(a[a.index("--spectral-smooth") + 1]) if "--spectral-smooth" in a else 0.0
+    if "--spectral-smooth" in a and not 0 < smooth_db <= 3:
+        sys.exit("--spectral-smooth must be greater than 0 and at most 3 dB")
+    if not 0.7 <= width <= 1.4:
+        sys.exit("--width must be 0.7..1.4; check mono compatibility")
     from scipy.io import wavfile
     y, sr = load(src)
+    if do_declick:
+        from spectral_repair import declick_array
+        y, repaired = declick_array(y, sr)
+        print(f"declick: repaired {repaired} isolated samples before tonal processing")
+    if smooth_db > 0:
+        from spectral_repair import smooth_array
+        y = smooth_array(y, sr, smooth_db)
+        print(f"spectral smooth: narrow peaks attenuated by at most {smooth_db:g} dB")
     if dehum_f > 0:  # repair first (DC + mains hum), before any tonal/dynamics work
         from scipy import signal as _sh
         y = y - y.mean(axis=0)
@@ -219,10 +233,11 @@ def main():
         for c in range(y.shape[1]):
             y[:, c] = shape(y[:, c], sr, transient_a, 0.0)
         print(f"transient: attack {transient_a:+.1f} dB")
-    if (mono_f > 0 or sidehpf > 0) and y.shape[1] == 2:
+    if (mono_f > 0 or sidehpf > 0 or width != 1.0) and y.shape[1] == 2:
         from stereo_tool import process
         y = process(y, sr, mono_f, width, sidehpf)
-        print(f"stereo: {'sidehpf<%dHz' % sidehpf if sidehpf > 0 else 'mono<%dHz' % mono_f} width={width}")
+        mode = f"sidehpf<{sidehpf:g}Hz" if sidehpf > 0 else (f"mono<{mono_f:g}Hz" if mono_f > 0 else "width only")
+        print(f"stereo: {mode} width={width}")
     m0 = full_measure(y, sr)
     print(f"before: LUFS-I {m0['lufs']} TP {m0['tp']}dBTP crest {m0['crest']}dB")
     step = max(min(want - (lufs_integrated(y, sr)), 12.0), -12.0)

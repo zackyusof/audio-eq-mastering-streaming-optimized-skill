@@ -60,6 +60,34 @@ If mix-vs-stem is truly ambiguous, SAY SO and give both readings.
 - Minimum-phase filtering only (`sosfilt`/`lfilter`) — zero-phase `filtfilt` inflated peaks to 1.26.
   RMS-match is MANDATORY for fair A/B; soft-clip (tanh knee >0.95) transients only, ceiling 0.99.
 
+### 4c. Ask for optional processing before any render or repair
+After probe/diagnosis and before changing audio, present **one compact menu** with every available
+stage group and ask which to add or change. Do this once per song/batch, not once per track. An
+explicit user choice in the current request counts as an answer; do not ask again for that choice.
+If the user says "defaults", "none", or chooses no additional stages, run the existing skill-default
+chain unchanged: `--lufs -14 --tp -1.0 --eq --deess --harsh --dyneq --translate --clip 1.0
+--comp --mono 200` (plus `--qc` for verification). The new repair, smoothing, and space options
+are **off** by default. Do not infer them from the filename or a spectrogram.
+
+Menu to show, with current/default values visible:
+1. **Repair:** short click/pop interpolation (`--declick`), DC/hum (`--dehum 50|60`), gentle
+   narrow-peak spectral smoothing (`--spectral-smooth 0.5..3`, default suggestion 1.5 dB).
+2. **Tone:** current corrective EQ or linear-phase EQ; de-ess, harshness, dynamic EQ, low-end
+   translation, and reference tonal match (reference file required).
+3. **Dynamics and color:** current clipper + glue compression, or multiband, vintage color,
+   transient shaping; confirm loudness and true-peak targets.
+4. **Space:** current mono lows at 200 Hz; alternative side HPF, modest full-mix width
+   (`--width 1.0..1.2`), or **stem-based** overlap report + chosen EQ cut/pan. Ask for aligned
+   stems and which instrument has priority before changing a stem. A full mix cannot expose or
+   separately pan individual instruments. Optional external Demucs separation requires a separate
+   explicit request; its estimated stems can contain bleed and artifacts.
+5. **Delivery:** float WAV default, optional CD-only 16-bit dither, MP3 with exact tags, QC,
+   codec check. Confirm album/artist/year for MP3 when not already specified.
+
+Read-only probe, spectrum, timeline, and stem-overlap analysis may happen before this choice;
+rendering, repair, separation downloads, and writes wait for the answer. If the user's instruction
+already authorizes defaults, proceed immediately with the default preset.
+
 ### 5. Demo render (only when the diagnosis supports it, or user asks)
 Run `scripts/eq_demo.py <in.wav> <out.wav> [options]`. Default chain (conservative full-mix mud fix):
 HPF 28 Hz 24dB/oct, +0.8 dB @ 90 Hz Q1.0, −1.5 dB @ 150 Hz Q1.2, −3.5 dB @ 270 Hz Q0.9,
@@ -75,6 +103,8 @@ Toolchain (ONE entry point, same on every agent/host):
 - `pip install pyloudnorm` — the standard BS.1770 meter. Built-in `lufs_meter.py` is fallback only
   (validated: reads ~0.5 LU lower than pyloudnorm — never mix the two in one report).
 - `scripts/master.py <in> <out> --lufs <t> --tp <t> [flags]` — full chain: deess+harsh → eq → dyneq → translate → ref → multiband/comp → color → mono → clip → makeup → limit → verify → dither.
+  Optional pre-inserts: `--declick` for isolated <=2 ms defects and `--spectral-smooth N` for
+  attenuation-only narrow-peak smoothing (0<N<=3 dB). They never run unless chosen.
   `--eq` skill-default EQ (raw mixes only); `--clip N` soft-clip pre-makeup; `--deess` split-shelf 7kHz/2.5dB first-insert;
   `--harsh` dynamic resonance tamer (2-8kHz, top-3 peaks prom≥8dB, range 2dB/peak total cap 4dB, skips clean material);
   `--dyneq` whole-song dynamic EQ (2s ticks vs song-median target, cuts-only cap 2dB, 3-tick smoothing, filter-bank gains — fixes sections, never the average; sub/thump excluded); `--translate` low-end translation (three zones: sub felt / body 60-200 heard-everywhere / 200-500 harmonics;
@@ -248,6 +278,34 @@ Blast radius + re-render (2026-10-10, same day): the mono-below phase bug had SH
 verified 43/43 in spec (−14.0..−14.5 LUFS, TP ≤ −1.07 dBTP, MP3 durations ok). Pre-fix backup kept at
 `<project>/.pre-mono-fix-backup-20261010`. Re-render discipline: recover the batch flags from the opencode log
 ("spawning process"), BACK UP FIRST, and prove the fix with a before/after band measurement — never trust "looks right".
+
+### 5j. Optional spectral repair and instrument space (researched 2026-10-10)
+See `references/spectral-space-research.md` for primary GitHub projects, evidence, and limits.
+- `spectral_repair.py <in.wav> <out.wav> --declick [--smooth-db 1.5]` is a standalone preview.
+  `master.py --declick --spectral-smooth 1.5` applies the same stages before dehum/EQ only when
+  selected. Click repair interpolates isolated sample-scale defects up to 2 ms. Compare the
+  detected count, waveforms, and before/after listening; do not use it as a cure for clipped
+  audio, sustained crackle, drum transients, or longer dropouts. For those, flag manual repair.
+- Spectral smoothing attenuates narrow peaks above 500 Hz by at most the chosen dB amount. It
+  leaves low fundamentals alone, never boosts spectral valleys, and processes bounded chunks.
+  It can still dull desirable harmonics; use 0.5–1.5 dB first and A/B at matched loudness.
+- `stem_space.py analyze <stem1.wav> <stem2.wav> [...]` requires stems aligned to the same start,
+  length, and sample rate. It reports band-wise coactivity, shared energy, and level balance.
+  Its score is a **potential masking screen**, not measured audible separation or BSS SDR/SIR.
+  Do not report individual instrument separation from a full mix.
+- To create room, choose the lower-priority stem and a reported conflict band, then render a
+  broad, small cut: `stem_space.py render guitar.wav guitar_space.wav --cut-hz 2500 --cut-db 1.5
+  --q 0.9`. For a mono stem, optional `--pan -0.25` moves it left; stereo stems remain in their
+  original image. Recombine in the DAW and check the full mix, mono compatibility, and levels.
+  Never auto-EQ every conflicting band: overlapping fundamentals can be arrangement, not masking.
+- On a full mix, `--width 1.1` offers modest global M/S width (now works without `--mono`),
+  but it does not create instrument-specific space. Use the existing `--mono 200` or
+  `--sidehpf 90` for low-end control. Keep width <=1.2 as the starting option; check mono and
+  minimum L/R correlation with `qc_report.py`.
+- If actual source extraction is explicitly requested and stems are unavailable, explain
+  Demucs (vocals/drums/bass/other) as an **optional external model**, verify its current install
+  and model command before running, and inspect bleed/artifacts. Do not silently install or
+  download models, and do not call HPSS true instrument separation.
 
 ### 6. Persist
 Log one `action` memory entry (file, key numbers, demo path). Report concisely: table + fix list, no superlatives.

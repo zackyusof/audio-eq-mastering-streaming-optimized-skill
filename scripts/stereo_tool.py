@@ -31,12 +31,14 @@ def process(y, sr, mono_freq=200.0, width=1.1, sidehpf=0.0):
         # gentler alternative to full mono: high-pass the SIDE below N (keeps 90-200Hz width)
         sos_hp = signal.butter(4, sidehpf, btype="highpass", fs=sr, output="sos")
         side2 = signal.sosfilt(sos_hp, side) * width
-    else:
+    elif mono_freq > 0:
         # mono the side below mono_freq: highpass the side directly. Do NOT do
         # side - lowpass(side) — a minimum-phase lowpass has phase lag, so that
         # subtracts out of phase and BOOSTS the transition ~+3dB instead of removing it.
         side_hi = lr4_hp(side, sr, mono_freq)
         side2 = side_hi * width  # lows stay mono, highs get width
+    else:
+        side2 = side * width
     L2, R2 = mid + side2, mid - side2
     return np.stack([L2, R2], axis=1)
 
