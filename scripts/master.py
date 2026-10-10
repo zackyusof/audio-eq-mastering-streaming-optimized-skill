@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""One entry point for mastering: [deess+harsh] -> [EQ] -> [dyneq] -> [translate] -> [ref] -> [multiband/comp] -> [color] -> [mono] -> clip -> makeup -> limit -> verify -> [dither16].
+"""One entry point for mastering: repair -> tone -> dynamics -> stereo -> limit -> [dither16] -> 2 s lead-in.
 Usage: master.py <in.wav> <out.wav> --lufs -14 --tp -1.0 [--declick] [--spectral-smooth 1.5] [--dehum 50] [--eq | --lpeq] [--clip N] [--deess] [--harsh] [--dyneq] [--translate] [--ref REF.wav --refamt 0.6] [--multiband] [--comp] [--color pultec|tape15|tube|transformer] [--transient A] [--mono 200 --width 1.1 | --sidehpf 90] [--dither16] [--qc]
-Chain order = doctrine (deess+harsh first, translation before dynamics, clipper before limiter, dither last, 16-bit only).
+Chain order = doctrine (deess+harsh first, translation before dynamics, clipper before limiter, dither as the last DSP stage before digital-silence conformance).
 Standard meter: pyloudnorm (fallback: built-in lufs_meter, reads ~0.5 LU lower)."""
 import os
 import sys
@@ -255,6 +255,11 @@ def main():
         tpdf = rng.random(out.shape) - rng.random(out.shape)
         out = _npd.clip(_npd.round((out + tpdf / 32768.0) * 32768.0), -32768, 32767).astype(_npd.float32) / 32768.0
         print("dither: TPDF 2LSB to 16-bit grid (last, CD only)")
+    from lead_in import enforce_two_second_lead
+    out, lead = enforce_two_second_lead(out, sr)
+    print(f"lead-in: {lead['before_seconds']:.3f}s -> 2.000s digital silence "
+          f"(duration {lead['duration_change_seconds']:+.3f}s)")
+    if do_dither:
         wavfile.write(dst, sr, (out * 32768.0).astype("int16"))
     else:
         wavfile.write(dst, sr, out.astype("float32"))

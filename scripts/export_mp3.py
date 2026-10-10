@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """House MP3 export: 48kHz, 320kbps-ceiling VBR, 16-bit stereo + house ID3 defaults. numpy+lameenc+mutagen.
-Usage: export_mp3.py <in.wav> <out.mp3> [--rate 48000 --bitrate 320] [--title T] [--artist A] [--album B] [--year Y]
+Usage: export_mp3.py <in.wav> <out.mp3> [--rate 48000 --bitrate 320] [--title T] [--artist A] [--album B] [--year Y] [--composer C]
    or: export_mp3.py <existing.mp3>  (retag-only: apply house defaults, no re-encode)
 House tags (ID3v2.3, UTF-8): Title = output filename minus extension; Artist = Zack Yusof;
 Album = --album or SOURCE file's parent dir name; Year = --year or current year (verified live);
-AlbumArtist (TPE2) = Zack Yusof; Composer (TCOM) = Zack Yusof.
+AlbumArtist (TPE2) = Artist; Composer (TCOM) = --composer or Artist.
+Final MP3 renders reserve one encoder frame below the 2-second leading-silence ceiling.
 Missing-field rule (user directive): if title/album resolve empty and no override is given, exit
 non-zero naming the missing field so the user can supply it — never ship untagged masters.
 Why lameenc, not afconvert: this host's afconvert MPG3 encoder fails ('fmt?' — encode path
@@ -52,7 +53,10 @@ def main():
     a = sys.argv
     if len(a) < 2 or (len(a) < 3 and not a[1].lower().endswith(".mp3")):
         sys.exit("usage: export_mp3.py <in.wav> <out.mp3> [options] | export_mp3.py <existing.mp3> (retag-only)")
-    src, dst = a[1], a[2] if len(a) > 2 and not a[1].lower().endswith(".mp3") else (None, a[1])
+    if a[1].lower().endswith(".mp3"):
+        src, dst = None, a[1]
+    else:
+        src, dst = a[1], a[2]
     opt = {}
     for k in ("--title", "--artist", "--album", "--year", "--composer"):
         if k in a:
@@ -78,6 +82,10 @@ def main():
     if peak >= 1.0:
         y = y * 0.99 / peak
         print(f"scaled {peak:.3f}->0.99 pre-encode")
+    from lead_in import enforce_two_second_lead
+    y, lead = enforce_two_second_lead(y, sr, encoder_guard_samples=1152)
+    print(f"lead-in: {lead['before_seconds']:.3f}s -> {lead['after_seconds']:.3f}s PCM silence "
+          f"(one MP3 frame reserved; duration {lead['duration_change_seconds']:+.3f}s)")
     pcm = (np.clip(y, -1, 1) * 32767).astype('<i2')
     import lameenc
     enc = lameenc.Encoder()
@@ -105,7 +113,7 @@ def main():
     print(f"wrote {dst} 48kHz stereo VBR ceiling {ceil}k avg {avg:.0f}k 16-bit {dur:.1f}s")
     t = house_tags(dst, src, opt)
     print(f"tagged: title={t[0]} artist={t[1]} album={t[2]} year={t[3]} +albumartist/composer")
-    # HARD GATE: the tagged MP3 must report the SAME duration as the source. Guards
+    # HARD GATE: the tagged MP3 must report the SAME duration as the rendered PCM. Guards
     # against a missing Xing/Info VBR header (lameenc writes none) => players show a
     # bogus duration (4:47 track as ~39 min). Never ship an MP3 that fails this.
     from mutagen.mp3 import MP3
@@ -115,9 +123,9 @@ def main():
             os.remove(dst)
         except OSError:
             pass
-        sys.exit(f"FATAL: {dst} reports {reported:.2f}s but source is {dur:.2f}s "
+        sys.exit(f"FATAL: {dst} reports {reported:.2f}s but rendered PCM is {dur:.2f}s "
                  f"(VBR/Xing header missing or broken) — file removed, do NOT ship")
-    print(f"verify: mp3 duration {reported:.2f}s == source {dur:.2f}s OK")
+    print(f"verify: mp3 duration {reported:.2f}s == rendered PCM {dur:.2f}s OK")
 
 if __name__ == "__main__":
     main()

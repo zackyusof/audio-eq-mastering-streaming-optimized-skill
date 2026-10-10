@@ -6,7 +6,7 @@ EQ, dynamic EQ, de-ess, harshness taming, M/S, glue compression, clipper, limite
 all from the command line, all reproducible, all verified by re-measurement.
 
 Originally an [OpenCode](https://opencode.ai) skill (`SKILL.md` included) — the Python scripts
-stand alone anywhere Python runs. **27 scripts**, one entry point (`master.py`).
+stand alone anywhere Python runs. **28 scripts**, one entry point (`master.py`).
 
 > This tool **cannot hear.** It outputs numbers and renders; taste calls stay with you.
 
@@ -18,7 +18,7 @@ stand alone anywhere Python runs. **27 scripts**, one entry point (`master.py`).
 | **Tonal** | `eq_demo.py` (minimum-phase corrective EQ), `linear_phase_eq.py` (zero-phase / linear-phase EQ), `dynamic_eq.py` (whole-song dynamic EQ), `ref_match.py` (reference tonal match), `vintage_color.py` (Pultec/tape/tube/transformer colour) |
 | **Dynamics** | `deesser.py`, `harshness.py` (dynamic 2–8 kHz resonance tamer), `glue_comp.py` (bus glue), `multiband.py` (4-band glue), `transient.py` (attack/sustain punch) |
 | **Spatial** | `mid_side.py` (true M/S EQ + width + mono-below), `stereo_tool.py` (mono lows / side-HPF + width + mono check), `translate.py` (low-end translation) |
-| **Level & output** | `limiter.py` (lookahead brickwall), `lufs_meter.py` (BS.1770), `dither.py` (TPDF, CD only), `export_mp3.py` (320k VBR + Xing + ID3v2.3), `xing_header.py` (repair VBR headers) |
+| **Level & output** | `limiter.py` (lookahead brickwall), `lufs_meter.py` (BS.1770), `dither.py` (TPDF, CD only), `lead_in.py` (2-second delivery lead), `export_mp3.py` (320k VBR + Xing + ID3v2.3), `xing_header.py` (repair VBR headers) |
 | **QC & repair** | `qc_report.py` (delivery QC + streaming forecast), `codec_check.py` (AAC/MP3 lossy gate), `dehum.py` (DC + mains-hum notch), `spectral_repair.py` (short clicks/pops and bounded peak smoothing) |
 
 ## Requirements
@@ -70,6 +70,25 @@ python3 scripts/export_mp3.py "../My Album/mastered/Track 01.wav" "../My Album/m
 ```
 
 Replace the example names and tags with yours, then repeat the last three commands for each source WAV. The MP3 title defaults to the output filename, and Composer defaults to `--artist`; add `--title` or `--composer` if either should differ. Keep the source mixes untouched so you can change the mastering settings and render again. `--eq` and the other processing switches are an example chain; listen and measure before choosing them for a release. To check a finished WAV separately, run `python3 scripts/qc_report.py "../My Album/mastered/Track 01.wav" --target -14 --tp -1.0`.
+
+### Two seconds before the music
+
+Final `master.py` WAV renders always begin with **exactly 2.000 seconds of digital silence**.
+The render finds sustained program onset, adds silence when the source lead-in is shorter, or
+trims excess silence when it is longer. The musical material from the detected onset onward
+stays intact; total file length can change. You do not need to add a lead-in to source mixes.
+
+```text
+0.000 s                         2.000 s
+|----------- silence -----------| program audio ...
+```
+
+The detector uses two 10 ms blocks above -80 dBFS, so a lone stray click does not count as
+the song start. Inspect unusually quiet fade-ins. Direct `export_mp3.py` renders apply the
+same ceiling, reserving one MP3 frame (24 ms at 48 kHz) for codec timing. Thus pre-encode PCM
+silence is 1.976 s, and decoded MP3 starts near 2 s; decoders can differ by a few milliseconds.
+The MP3 duration check compares against its adjusted PCM render. Diagnostic previews and
+individual stems keep their original alignment; only final mastering and MP3 delivery conform.
 
 ## More commands
 
@@ -141,7 +160,7 @@ Order (doctrine: repair first, clipper before limiter, dither last):
 ```
 [dehum] → [deess → harshness] → [corrective EQ | linear-phase EQ] → [dyneq] → [translate]
         → [ref-match] → [multiband]/[glue] → [color] → [transient] → mono-lows/width
-        → clipper → limiter → verify → [dither16] → [MP3] → [QC]
+        → clipper → limiter → verify → [dither16] → 2 s WAV lead-in → [MP3 frame guard] → [QC]
 ```
 
 ```bash

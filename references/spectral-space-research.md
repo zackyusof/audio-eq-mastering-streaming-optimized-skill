@@ -58,6 +58,8 @@ global M/S width, but this cannot move its individual instruments.
 ## Execution rule
 
 Ask once for all optional stages before any audio-changing execution. If the user chooses no
-extras, run the established mastering preset exactly as before. New declick, smoothing, and
+ extras, run the established mastering DSP preset. New declick, smoothing, and
 width choices are explicit opt-ins; stem EQ/pan requires a named target stem, selected band,
-and render path. Measure and listen before claiming improvement.
+and render path. Measure and listen before claiming improvement. Final WAV/MP3 delivery then
+applies the mandatory maximum 2-second lead-in; individual stems retain their original start
+so they remain aligned.

@@ -82,7 +82,10 @@ Menu to show, with current/default values visible:
    separately pan individual instruments. Optional external Demucs separation requires a separate
    explicit request; its estimated stems can contain bleed and artifacts.
 5. **Delivery:** float WAV default, optional CD-only 16-bit dither, MP3 with exact tags, QC,
-   codec check. Confirm album/artist/year for MP3 when not already specified.
+   codec check. Confirm album/artist/year for MP3 when not already specified. Every final WAV
+   render gets exactly 2 seconds of digital silence before detected program; MP3 reserves one
+   encoder frame to keep the decoded lead-in below 2 seconds. This is a fixed delivery rule,
+   not an optional processing stage.
 
 Read-only probe, spectrum, timeline, and stem-overlap analysis may happen before this choice;
 rendering, repair, separation downloads, and writes wait for the answer. If the user's instruction
@@ -102,7 +105,7 @@ not raw level, are what reads as "heavy" after normalization.
 Toolchain (ONE entry point, same on every agent/host):
 - `pip install pyloudnorm` — the standard BS.1770 meter. Built-in `lufs_meter.py` is fallback only
   (validated: reads ~0.5 LU lower than pyloudnorm — never mix the two in one report).
-- `scripts/master.py <in> <out> --lufs <t> --tp <t> [flags]` — full chain: deess+harsh → eq → dyneq → translate → ref → multiband/comp → color → mono → clip → makeup → limit → verify → dither.
+- `scripts/master.py <in> <out> --lufs <t> --tp <t> [flags]` — full chain: deess+harsh → eq → dyneq → translate → ref → multiband/comp → color → mono → clip → makeup → limit → verify → dither → 2-second render lead-in.
   Optional pre-inserts: `--declick` for isolated <=2 ms defects and `--spectral-smooth N` for
   attenuation-only narrow-peak smoothing (0<N<=3 dB). They never run unless chosen.
   `--eq` skill-default EQ (raw mixes only); `--clip N` soft-clip pre-makeup; `--deess` split-shelf 7kHz/2.5dB first-insert;
@@ -185,7 +188,7 @@ Run: `python3 tests/test_*.py` (stdlib unittest, no pytest). `requirements.txt`:
 - Watcher fallback: own-session shell loop every 2 min on `mastered/*.wav + mp3/*.mp3` counts == source counts,
   90-min timeout with partial-state report; its exit is the completion ping. Then verify per-track table from
   logs (LUFS/TP/limGR/compGR/harsh/translate/mp3avg, zero nonzero-rc) + tag readback + **duration check
-  (mp3 == src, see 5g)** + freshness mtimes.
+  (mp3 ~= its rendered PCM, see 5g)** + freshness mtimes.
 - Typical yields: harsh fires ~20% of tracks (real +8dB outliers only), translate trims only sub>12% tracks,
   limGR ≤3.8 except dense-wall tracks (see clip escalation). Album tags: Title=file, Album=src dir, Year=live.
 
@@ -194,13 +197,17 @@ Never ship an MP3 whose *reported* length is wrong. lameenc emits **no Xing/Info
 and parsers assume CBR from the first frame's bitrate and show garbage durations (e.g. 4:48 track as ~39 min)
 — the audio is fine, only the length metadata is wrong. Rules:
 - `export_mp3.py` injects a Xing frame after encode **and hard-gates**: it re-reads the tagged MP3 and
-  `sys.exit`s (deleting the file) if `|MP3 reported duration − source duration| > 0.5 s`. NEVER bypass.
+  `sys.exit`s (deleting the file) if `|MP3 reported duration − rendered PCM duration| > 0.5 s`.
+  The new lead-in rule can change duration relative to the original source. NEVER bypass.
 - Repair already-delivered files **losslessly, no re-encode**: `python3 scripts/xing_header.py <file.mp3> [...]`
   (keeps a `.bak`). Idempotent — skips files that already have a header.
-- VERIFY every export: `mutagen` `MP3(dst).info.length` must equal the source WAV length. Ground truth for an
+- VERIFY every export: `mutagen` `MP3(dst).info.length` must match the rendered PCM length within
+  0.5 s. Ground truth for an
   MP3's true length is a **frame scan** (`frames × 1152 / sr` for MPEG-1 Layer III @48k) — `afinfo`
   mis-estimates VBR and must not be trusted for duration.
-- Album gate: `src wav count == mastered count == mp3 count` AND every `mp3 duration == src duration`.
+- Album gate: `src wav count == mastered count == mp3 count`; every mastered WAV has 2.000 s of
+  digital leading silence; every MP3 passes its own rendered-PCM duration gate and the decoded
+  start is <=2 s when a decoder is available. Expect one MP3 frame of duration granularity.
 
 ### 5h. Anti-aliasing / oversampling — is it mandatory? (researched 2026-10-10: Tonalux, Gazillion, Wojcik-measured, Julius O. Smith)
 Two different things share the name — do not conflate them:
@@ -306,6 +313,29 @@ See `references/spectral-space-research.md` for primary GitHub projects, evidenc
   Demucs (vocals/drums/bass/other) as an **optional external model**, verify its current install
   and model command before running, and inspect bleed/artifacts. Do not silently install or
   download models, and do not call HPSS true instrument separation.
+
+### 5k. Mandatory render lead-in: 2-second maximum (2026-10-10)
+On **every final mastered WAV** from `master.py`, detect sustained program onset after all DSP
+and dither, replace its pre-program region with exactly 2.000 seconds of digital zeros, and
+preserve every sample from detected onset onward. If the original lead is shorter, pad; if
+longer, trim. `lead_in.py` uses two consecutive 10 ms RMS blocks above -80 dBFS, then finds
+the first above-threshold sample in the first block. A single stray click does not establish
+song onset. Reject an all-silent file. Log old/new lead and signed duration change; verify the
+WAV's first 2 seconds are zeros and the detected onset is at 2.000 seconds.
+
+`export_mp3.py` also conforms direct WAV-to-MP3 exports. It reserves one MPEG-1 Layer III
+frame (1152 samples) before the 2-second ceiling because encoding/decoding can add frame
+timing; at 48 kHz the pre-encode PCM lead is 1.976 s. The tested `afconvert` decoder yielded
+1.980 s from this input. Decoder timing can vary, so report the PCM target and, where a
+decoder is available, verify decoded onset <=2 s. The duration gate compares the MP3 with
+its **rendered PCM**, not the original WAV. For a mastered WAV followed by MP3 export, the
+exporter replaces the WAV's 2-second lead with its codec-guarded lead once; it never adds
+another 2 seconds.
+
+Do not apply the rule to diagnostic/demo renders or individual stems: adding/trimming time
+on one stem would break multitrack alignment. Final delivery goes through `master.py` and
+`export_mp3.py`. The -80 dBFS detector is a conservative technical boundary, not a musical
+judgment; inspect a very quiet fade-in before delivery.
 
 ### 6. Persist
 Log one `action` memory entry (file, key numbers, demo path). Report concisely: table + fix list, no superlatives.
