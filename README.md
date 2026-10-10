@@ -1,8 +1,9 @@
-# Audio Analysis & Mastering Skill
+# Audio EQ Mastering — Streaming Optimized
 
-Measure any stereo mix (or stem) with FFT spectrum diagnostics, fix its EQ balance with a
-validated corrective chain, then master it to streaming loudness standards — all from the
-command line, all reproducible, all verified by re-measurement.
+Balance any stereo mix with FFT spectrum diagnostics and a validated corrective EQ chain,
+then master it to streaming loudness standards (−14 LUFS / −1.0 dBTP) with a calibrated
+soft-clipper and lookahead brickwall limiter — all from the command line, all reproducible,
+all verified by re-measurement.
 
 Built from a real session: 9 full mixes analyzed, EQ'd, and mastered to −14 LUFS / −1.0 dBTP.
 Originally an [OpenCode](https://opencode.ai) skill (`SKILL.md` included) — the Python scripts
