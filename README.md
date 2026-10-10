@@ -23,12 +23,55 @@ stand alone anywhere Python runs. **25 scripts**, one entry point (`master.py`).
 
 ## Requirements
 
-- Python 3.11+ with `pip install -r requirements.txt` (numpy, scipy, pyloudnorm; `lameenc` + `mutagen` for MP3 export)
+- Python 3.11+ with `python3 -m pip install -r requirements.txt` (numpy and scipy for mastering; `lameenc` and `mutagen` for MP3 export). `pyloudnorm` is optional; the bundled loudness meter is the fallback.
 - WAV input (PCM 16/24/32 or Float32). For MP3/M4A, convert first:
   - macOS: `afconvert -f WAVE -d LEI24 in.mp3 tmp.wav`
   - Linux/Windows: `ffmpeg -i in.mp3 -c:a pcm_s24le tmp.wav`
 
-## Quickstart
+## Use it with your own songs
+
+Clone this repository and run the commands from its root (the directory containing `scripts/`). Keep each album or project in a **main directory beside the clone**. Put the source stereo WAV mixes directly in that main directory; put the finished WAVs in `mastered/` and the MP3 copies in `mp3/`. These output directories must exist before running the scripts.
+
+```text
+work/
+|-- audio-eq-mastering-streaming-optimized-skill/  <- run commands here
+|   |-- README.md
+|   `-- scripts/
+`-- My Album/                                 <- main directory: source material
+    |-- Track 01.wav                              <- original stereo mix
+    |-- Track 02.wav
+    |-- mastered/                                <- finished WAVs
+    |   |-- Track 01.wav
+    |   `-- Track 02.wav
+    `-- mp3/                                     <- MP3 copies of finished WAVs
+        |-- Track 01.mp3
+        `-- Track 02.mp3
+```
+
+The `mastered/` and `mp3/` files in the picture are **results**, not files to create by hand. Start by creating the two empty directories and placing your source WAVs in `My Album/`. The scripts do not automatically discover an album or create its output directories.
+
+From the repository root, install dependencies and process one track:
+
+```bash
+python3 -m pip install -r requirements.txt
+python3 -c "from pathlib import Path; p = Path('../My Album'); (p / 'mastered').mkdir(parents=True, exist_ok=True); (p / 'mp3').mkdir(exist_ok=True)"
+
+# Inspect the source mix.
+python3 scripts/analyze_audio.py probe "../My Album/Track 01.wav"
+
+# Master it. The first path is the source; the second is the finished WAV.
+python3 scripts/master.py "../My Album/Track 01.wav" "../My Album/mastered/Track 01.wav" \
+  --lufs -14 --tp -1.0 --eq --deess --harsh --dyneq --translate \
+  --clip 1.0 --comp --mono 200 --qc
+
+# Export an MP3 from the finished WAV, with your own release tags.
+python3 scripts/export_mp3.py "../My Album/mastered/Track 01.wav" "../My Album/mp3/Track 01.mp3" \
+  --artist "Your Artist" --album "My Album" --year 2026
+```
+
+Replace the example names and tags with yours, then repeat the last three commands for each source WAV. The MP3 title defaults to the output filename, and Composer defaults to `--artist`; add `--title` or `--composer` if either should differ. Keep the source mixes untouched so you can change the mastering settings and render again. `--eq` and the other processing switches are an example chain; listen and measure before choosing them for a release. To check a finished WAV separately, run `python3 scripts/qc_report.py "../My Album/mastered/Track 01.wav" --target -14 --tp -1.0`.
+
+## More commands
 
 ```bash
 # 1. Diagnose a mix

@@ -44,7 +44,7 @@ def house_tags(dst, src_for_album, opt):
     audio.tags.add(TALB(encoding=3, text=album))
     audio.tags.add(TDRC(encoding=3, text=year))
     audio.tags.add(TPE2(encoding=3, text=artist))
-    audio.tags.add(TCOM(encoding=3, text=HOUSE_ARTIST))
+    audio.tags.add(TCOM(encoding=3, text=opt.get("composer") or artist))
     audio.save(v2_version=3)
     return title, artist, album, year
 
@@ -54,7 +54,7 @@ def main():
         sys.exit("usage: export_mp3.py <in.wav> <out.mp3> [options] | export_mp3.py <existing.mp3> (retag-only)")
     src, dst = a[1], a[2] if len(a) > 2 and not a[1].lower().endswith(".mp3") else (None, a[1])
     opt = {}
-    for k in ("--title", "--artist", "--album", "--year"):
+    for k in ("--title", "--artist", "--album", "--year", "--composer"):
         if k in a:
             opt[k[2:]] = a[a.index(k) + 1]
     if src is None:  # retag-only
