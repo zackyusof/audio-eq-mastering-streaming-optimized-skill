@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """One entry point for mastering: repair -> tone -> dynamics -> stereo -> limit -> [dither16] -> 2 s lead-in.
-Usage: master.py <in.wav> <out.wav> --lufs -14 --tp -1.0 [--declick] [--spectral-smooth 1.5] [--dehum 50] [--eq | --lpeq] [--clip N] [--deess] [--harsh] [--dyneq] [--translate] [--ref REF.wav --refamt 0.6] [--multiband] [--comp] [--color pultec|tape15|tube|transformer] [--transient A] [--mono 200 --width 1.1 | --sidehpf 90] [--dither16] [--qc]
+Usage: master.py <in.wav> <out.wav> [--profile NAME] --lufs -14 --tp -1.0 [--declick] [--spectral-smooth 1.5] [--dehum 50] [--eq | --lpeq] [--tilt N --pivot HZ --skew G | --tilt-target DB_OCT] [--clip N] [--deess] [--harsh] [--dyneq [--dyneq-cap 1.0]] [--translate] [--ref REF.wav --refamt 0.6] [--multiband] [--comp | --no-comp] [--color pultec|tape15|tube|transformer] [--transient A] [--mono 200 --width 1.1 | --sidehpf 90] [--dither16] [--qc]
 Chain order = doctrine (deess+harsh first, translation before dynamics, clipper before limiter, dither as the last DSP stage before digital-silence conformance).
-Standard meter: pyloudnorm (fallback: built-in lufs_meter, reads ~0.5 LU lower)."""
+Standard meter: pyloudnorm (fallback: built-in lufs_meter, reads ~0.5 LU lower).
+Module tuning (per-profile via profiles.py): --comp-ratio R --comp-attack MS --comp-release MS --comp-gr DB;
+--color-drive 0-1 --color-mix 0-1; --deess-f0 HZ --deess-range DB."""
 import os
 import sys
 import numpy as np
@@ -46,13 +48,24 @@ def limit_tp(base, sr, tp_t, margin0=1.0):
 
 def main():
     a = sys.argv
-    usage = "usage: master.py <in.wav> <out.wav> [--lufs -14] [--tp -1.0] [processing options]"
+    usage = "usage: master.py <in.wav> <out.wav> [--profile NAME | --list-profiles] [--lufs -14] [--tp -1.0] [processing options]"
     if len(a) == 2 and a[1] in ("-h", "--help"):
         print(usage)
+        return
+    if "--list-profiles" in a:  # convenience: show the profiles and stop
+        from profiles import main as _pmain
+        _pmain(["list"])
         return
     if len(a) < 3:
         sys.exit(usage)
     src, dst = a[1], a[2]
+    if "--profile" in a:  # named preset; explicit user flags come first and therefore win
+        from profiles import profile_args, PROFILES
+        _p = a[a.index("--profile") + 1]
+        if _p not in PROFILES:
+            sys.exit(f"unknown profile {_p!r}; known: {', '.join(PROFILES)}")
+        a = a + profile_args(_p)
+        print(f"profile: {_p} ({PROFILES[_p]['engineer']}) [{PROFILES[_p]['genre']}]")
     want = float(a[a.index("--lufs") + 1]) if "--lufs" in a else -14.0
     tp_t = float(a[a.index("--tp") + 1]) if "--tp" in a else -1.0
     do_eq = "--eq" in a
@@ -61,7 +74,8 @@ def main():
     do_harsh = "--harsh" in a
     do_translate = "--translate" in a
     do_dyneq = "--dyneq" in a
-    do_comp = "--comp" in a
+    dyneq_cap = float(a[a.index("--dyneq-cap") + 1]) if "--dyneq-cap" in a else 1.0
+    do_comp = "--comp" in a and "--no-comp" not in a  # --no-comp negates a profile's --comp (profile args append, so omission alone can't win)
     mono_f = float(a[a.index("--mono") + 1]) if "--mono" in a else 0.0
     sidehpf = float(a[a.index("--sidehpf") + 1]) if "--sidehpf" in a else 0.0
     width = float(a[a.index("--width") + 1]) if "--width" in a else 1.0
@@ -72,6 +86,18 @@ def main():
     refamt = float(a[a.index("--refamt") + 1]) if "--refamt" in a else 0.6
     dehum_f = float(a[a.index("--dehum") + 1]) if "--dehum" in a else 0.0
     do_lpeq = "--lpeq" in a
+    tilt_db = float(a[a.index("--tilt") + 1]) if "--tilt" in a else 0.0
+    tilt_pivot = float(a[a.index("--pivot") + 1]) if "--pivot" in a else 800.0
+    tilt_skew = float(a[a.index("--skew") + 1]) if "--skew" in a else 1.0
+    tilt_target = float(a[a.index("--tilt-target") + 1]) if "--tilt-target" in a else None
+    comp_ratio = float(a[a.index("--comp-ratio") + 1]) if "--comp-ratio" in a else 2.5
+    comp_attack = float(a[a.index("--comp-attack") + 1]) / 1000.0 if "--comp-attack" in a else 0.03
+    comp_release = float(a[a.index("--comp-release") + 1]) / 1000.0 if "--comp-release" in a else 0.25
+    comp_gr = float(a[a.index("--comp-gr") + 1]) if "--comp-gr" in a else 1.5
+    col_drive = float(a[a.index("--color-drive") + 1]) if "--color-drive" in a else 0.5
+    col_mix = float(a[a.index("--color-mix") + 1]) if "--color-mix" in a else 0.5
+    deess_f0 = float(a[a.index("--deess-f0") + 1]) if "--deess-f0" in a else 7000.0
+    deess_rng = float(a[a.index("--deess-range") + 1]) if "--deess-range" in a else 2.5
     transient_a = float(a[a.index("--transient") + 1]) if "--transient" in a else None
     do_qc = "--qc" in a
     do_declick = "--declick" in a
@@ -104,7 +130,7 @@ def main():
     if do_deess:
         from deesser import bandpass, detect_env, gr_from_env
         import numpy as _np
-        F0, Q, RNG, RATIO = 7000.0, 1.8, 2.5, 3.0
+        F0, Q, RNG, RATIO = deess_f0, 1.8, deess_rng, 3.0
         bands = _np.empty_like(y)
         for c in range(y.shape[1]):
             bands[:, c] = bandpass(y[:, c], sr, F0, Q)
@@ -142,8 +168,8 @@ def main():
             print(f"harsh: no resonances >=8dB (score {hscore}) — skipped")
     if do_lpeq:  # linear-phase variant of the skill-default chain (standard mastering EQ mode)
         from linear_phase_eq import process_channel
-        _bands = [(90, 0.8, 1.0), (150, -1.5, 1.2), (270, -3.5, 0.9), (3200, 2.0, 0.9)]
-        _hs = [(10500, 2.5)]
+        _bands = [(90, 0.8, 1.0), (270, -1.5, 0.8), (500, -1.0, 1.0)]
+        _hs = [(10500, 1.5)]
         for c in range(y.shape[1]):
             y[:, c] = process_channel(y[:, c], sr, 28.0, _bands, [], _hs, 50.0)
         print("eq: skill-default chain applied (LINEAR phase)")
@@ -157,6 +183,20 @@ def main():
                 b, bb = rbj_peak(f0, g, q, sr) if kind == "peak" else rbj_hshelf(f0, g, sr, q)
                 y[:, c] = signal.lfilter(b, bb, y[:, c])
         print("eq: skill-default chain applied (minimum phase)")
+    if tilt_db != 0.0:  # macro see-saw tonal balance (Baxandall/Niveau), after corrective EQ
+        from tilt import apply_tilt
+        y = apply_tilt(y, sr, tilt_db, tilt_pivot, tilt_skew)
+        print(f"tilt: {tilt_db:+.2f} dB see-saw @ {tilt_pivot:.0f} Hz (skew {tilt_skew:.2f})")
+    elif tilt_target is not None:  # auto: tilt toward a target octave-band slope (dB/oct)
+        from tilt import apply_tilt, measure_slope, tilt_for_target
+        _cur, _, _ = measure_slope(y.mean(axis=1), sr)
+        _need = tilt_for_target(_cur, tilt_target)
+        if abs(_need) >= 0.25:
+            y = apply_tilt(y, sr, _need, tilt_pivot, tilt_skew)
+            print(f"tilt(auto): slope {_cur:+.2f} -> target {tilt_target:+.2f} dB/oct => "
+                  f"{_need:+.2f} dB @ {tilt_pivot:.0f} Hz")
+        else:
+            print(f"tilt(auto): slope {_cur:+.2f} dB/oct within 0.25 of {tilt_target:+.2f} — skipped")
     if ref_p:
         from ref_match import shares, KEYS, CENTERS
         from eq_demo import rbj_peak as _rp, rbj_hshelf as _rhs
@@ -186,7 +226,7 @@ def main():
     if do_dyneq:
         from dynamic_eq import tick_shares, correction_curves, apply_dynamic, dyn_stats
         _ticks = tick_shares(y.mean(axis=1), sr)
-        _curves, _ = correction_curves(_ticks)
+        _curves, _ = correction_curves(_ticks, cap=dyneq_cap)
         _rep, _ = dyn_stats(_ticks, _curves)
         y = apply_dynamic(y, sr, _curves)
         print(f"dyneq: {len(_ticks)} ticks whole-song dynamic ({_rep})")
@@ -218,16 +258,17 @@ def main():
         print(f"clip: soft-clip shaved {shaved} dB before limiting")
     if do_comp:
         from glue_comp import compress
-        y, maxgr, thresh = compress(y, sr)
-        print(f"comp: glue ratio 2.5 attack 30ms release 250ms thresh {thresh:.1f}dB maxGR {maxgr:.2f}dB")
+        y, maxgr, thresh = compress(y, sr, comp_ratio, comp_attack, comp_release, comp_gr)
+        print(f"comp: glue ratio {comp_ratio} attack {comp_attack*1000:.0f}ms release {comp_release*1000:.0f}ms "
+              f"thresh {thresh:.1f}dB maxGR {maxgr:.2f}dB")
     if color:
         from vintage_color import tone, saturate
         import numpy as _nv
-        toned = tone(y, sr, color, 0.5)
-        sat = saturate(toned / max(float(_nv.abs(toned).max()), 1e-9) * 0.9, 0.5, color)
+        toned = tone(y, sr, color, col_drive)
+        sat = saturate(toned / max(float(_nv.abs(toned).max()), 1e-9) * 0.9, col_drive, color)
         sat *= float(_nv.sqrt((toned ** 2).mean())) / max(float(_nv.sqrt((sat ** 2).mean())), 1e-12)
-        y = toned * 0.5 + sat * 0.5
-        print(f"color: vintage {color} drive 0.5 mix 0.5 (parallel)")
+        y = toned * (1.0 - col_mix) + sat * col_mix
+        print(f"color: vintage {color} drive {col_drive} mix {col_mix} (parallel)")
     if transient_a is not None:  # punch shaping before the limiter (transient designer)
         from transient import shape
         for c in range(y.shape[1]):
@@ -255,9 +296,12 @@ def main():
         tpdf = rng.random(out.shape) - rng.random(out.shape)
         out = _npd.clip(_npd.round((out + tpdf / 32768.0) * 32768.0), -32768, 32767).astype(_npd.float32) / 32768.0
         print("dither: TPDF 2LSB to 16-bit grid (last, CD only)")
-    from lead_in import enforce_two_second_lead
+    from lead_in import enforce_two_second_lead, TARGET_SECONDS
     out, lead = enforce_two_second_lead(out, sr)
-    print(f"lead-in: {lead['before_seconds']:.3f}s -> 2.000s digital silence "
+    _nl = int(round(TARGET_SECONDS * sr))
+    assert (np.abs(out[:_nl]).max(axis=0) == 0).all(), "lead-in region is not digital silence"
+    assert len(out) > _nl, "render shorter than the 2 s lead-in"
+    print(f"lead-in: {lead['before_seconds']:.3f}s -> 2.000s digital silence (verified zeros) "
           f"(duration {lead['duration_change_seconds']:+.3f}s)")
     if do_dither:
         wavfile.write(dst, sr, (out * 32768.0).astype("int16"))

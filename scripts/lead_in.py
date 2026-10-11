@@ -44,11 +44,12 @@ def find_program_start(y, sr):
 
 
 def enforce_two_second_lead(y, sr, encoder_guard_samples=0):
-    """Return zeros, then program, with a two-second maximum lead-in.
+    """Return zeros, then program, with EXACTLY a two-second lead-in (min and max).
 
-    The program samples are untouched. Only the pre-program region is replaced;
-    total duration changes by (target lead - original lead-in). For MP3, reserve
-    one 1152-sample frame so codec delay cannot push the decoded onset past 2 s.
+    The program samples are untouched. Only the pre-program region is replaced:
+    longer silence is trimmed, shorter is padded, so total duration changes by
+    (target lead - original lead-in). For MP3, reserve one 1152-sample frame so
+    codec delay cannot push the decoded onset past 2 s.
     """
     x = np.asarray(y)
     one_dimensional = x.ndim == 1

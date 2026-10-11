@@ -2,9 +2,11 @@
 """House MP3 export: 48kHz, 320kbps-ceiling VBR, 16-bit stereo + house ID3 defaults. numpy+lameenc+mutagen.
 Usage: export_mp3.py <in.wav> <out.mp3> [--rate 48000 --bitrate 320] [--title T] [--artist A] [--album B] [--year Y] [--composer C]
    or: export_mp3.py <existing.mp3>  (retag-only: apply house defaults, no re-encode)
-House tags (ID3v2.3, UTF-8): Title = output filename minus extension; Artist = Zack Yusof;
-Album = --album or SOURCE file's parent dir name; Year = --year or current year (verified live);
-AlbumArtist (TPE2) = Artist; Composer (TCOM) = --composer or Artist.
+House tags (ID3v2.3, UTF-8): Title = output filename minus extension. Album-level tags
+(TALB/TPE1/TPE2/TCOM/TDRC) are INHERITED from an existing sibling .mp3 in the destination folder
+when one exists — a new track follows the album's already-tagged MP3s; --album/--artist/--composer/
+--year override. With no sibling, Album = SOURCE file's project ROOT dir name, Artist/AlbumArtist =
+Zack Yusof, Composer = Artist, Year = current year (verified live).
 Final MP3 renders reserve one encoder frame below the 2-second leading-silence ceiling.
 Missing-field rule (user directive): if title/album resolve empty and no override is given, exit
 non-zero naming the missing field so the user can supply it — never ship untagged masters.
@@ -24,14 +26,37 @@ from analyze_audio import load
 
 HOUSE_ARTIST = "Zack Yusof"
 
+def _sibling_album_tags(dst):
+    """Album-level tags from an existing sibling .mp3 in dst's folder (deliverable convention:
+    a new track follows the album's already-tagged MP3s). Returns {} if none exist or unreadable."""
+    import glob
+    folder = os.path.dirname(os.path.abspath(dst))
+    own = os.path.abspath(dst)
+    for p in sorted(glob.glob(os.path.join(folder, "*.mp3"))):
+        if os.path.abspath(p) == own:
+            continue
+        try:
+            from mutagen.id3 import ID3
+            t = ID3(p)
+        except Exception:
+            continue
+        got = {k: str(t.get(k)) for k in ("TALB", "TPE1", "TPE2", "TCOM", "TDRC") if t.get(k)}
+        if got:
+            return got
+    return {}
+
+
 def house_tags(dst, src_for_album, opt):
     title = opt.get("title") or os.path.splitext(os.path.basename(dst))[0]
+    sib = _sibling_album_tags(dst)  # existing album MP3s win over the folder name
     d = os.path.dirname(os.path.abspath(src_for_album))
     if os.path.basename(d).lower() in ("mp3", "mastered", "output", "out", "tmp", "temp"):
-        d = os.path.dirname(d)  # deliverable container dirs are not album names — use project dir
-    album = opt.get("album") or os.path.basename(d)
-    artist = opt.get("artist") or HOUSE_ARTIST
-    year = opt.get("year") or str(datetime.datetime.now().year)
+        d = os.path.dirname(d)  # deliverable container dirs are not album names — use project root
+    album = opt.get("album") or sib.get("TALB") or os.path.basename(d)
+    artist = opt.get("artist") or sib.get("TPE1") or HOUSE_ARTIST
+    albumartist = sib.get("TPE2") or artist
+    composer = opt.get("composer") or sib.get("TCOM") or artist
+    year = opt.get("year") or sib.get("TDRC") or str(datetime.datetime.now().year)
     missing = [n for n, v in (("title", title), ("album", album), ("artist", artist), ("year", year)) if not (v or "").strip()]
     if missing:
         sys.exit(f"missing ID3 fields (no default resolvable): {', '.join(missing)} — supply via --title/--artist/--album/--year")
@@ -44,8 +69,8 @@ def house_tags(dst, src_for_album, opt):
     audio.tags.add(TPE1(encoding=3, text=artist))
     audio.tags.add(TALB(encoding=3, text=album))
     audio.tags.add(TDRC(encoding=3, text=year))
-    audio.tags.add(TPE2(encoding=3, text=artist))
-    audio.tags.add(TCOM(encoding=3, text=opt.get("composer") or artist))
+    audio.tags.add(TPE2(encoding=3, text=albumartist))
+    audio.tags.add(TCOM(encoding=3, text=composer))
     audio.save(v2_version=3)
     return title, artist, album, year
 

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Whole-song dynamic EQ: listens in ticks, corrects per-section, not per-average. numpy+scipy only.
-Usage: dynamic_eq.py <in.wav> <out.wav> [--tick 2.0 --cap 2.0 --csv ticks.csv]
+Usage: dynamic_eq.py <in.wav> <out.wav> [--tick 2.0 --cap 1.0 --csv ticks.csv]
 Doctrine (Unison dynamic-EQ automation + Soothe "only when needed" + our static-EQ trap lesson):
 a static cut that fixes the chorus dulls the verse. So: slice the song into ticks (default 2s),
 measure 7 band shares per tick (mud..air; sub/thump left to translate/glue — dynamic low-end = pumping),
 compare each tick to the SONG MEDIAN (self-referential consistency target), cut over-represented bands
-proportionally (factor 0.5, cap 2dB, cuts ONLY — never chase loudness upward), smooth correction curves
+proportionally (factor 0.5, cap 1dB, cuts ONLY — never chase loudness upward), smooth correction curves
 across ticks (5-tick moving average + interpolate, no zipper), apply via fixed LR4 filter bank with
 time-varying per-band gains (no coefficient modulation -> no clicks). Min-phase, RMS-match, ceiling-only."""
 import os
@@ -32,7 +32,7 @@ def tick_shares(mono, sr, tick=2.0):
         out.append({k: P[(fr >= a) & (fr < b)].sum() / tot * 100 for k, (a, b) in BANDS.items()})
     return out
 
-def correction_curves(ticks, cap=2.0, factor=0.5):
+def correction_curves(ticks, cap=1.0, factor=0.5):
     med = {k: float(np.median([t[k] for t in ticks])) for k in DYN_BANDS}
     corr = {k: np.zeros(len(ticks)) for k in DYN_BANDS}
     for i, t in enumerate(ticks):
@@ -77,10 +77,10 @@ def dyn_stats(ticks, curves):
 def main():
     a = sys.argv
     if len(a) < 3:
-        sys.exit("usage: dynamic_eq.py <in.wav> <out.wav> [--tick 2.0 --cap 2.0 --csv ticks.csv]")
+        sys.exit("usage: dynamic_eq.py <in.wav> <out.wav> [--tick 2.0 --cap 1.0 --csv ticks.csv]")
     src, dst = a[1], a[2]
     tick = float(a[a.index("--tick") + 1]) if "--tick" in a else 2.0
-    cap = float(a[a.index("--cap") + 1]) if "--cap" in a else 2.0
+    cap = float(a[a.index("--cap") + 1]) if "--cap" in a else 1.0
     csvp = a[a.index("--csv") + 1] if "--csv" in a else ""
     y, sr = load(src)
     orig_rms = float(np.sqrt((y ** 2).mean()))

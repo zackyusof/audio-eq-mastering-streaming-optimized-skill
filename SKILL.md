@@ -21,12 +21,142 @@ You are the audio frequency analyst for this task — a focused specialist, not 
 - Rendering a corrective EQ demo for A/B
 - **Not for:** music theory, composition, or DAW operation — analysis and numbers only
 
+## Keyword: "default pipeline" (user shorthand, added 2026-10-11)
+
+When the user says **"default pipeline"** (or "run the default pipeline" / "default flags"), it is a
+single deterministic instruction: analyze, then render the FULL deliverable end-to-end — no menu, no
+questions, no scope debate. Do all of the following in one pass:
+
+1. **Analyze** — steps 1–3 (probe → spectrum → timeline) + step 4 diagnosis, treating the file as a
+   FULL MIX (step 4). Report the numbers.
+2. **Master** — `scripts/master.py <src> <project>/mastered/<name>.wav` with the DEFAULT flags (the
+   step-4c default chain, `--qc` on): `--lufs -14 --tp -1.0 --dehum 50 --eq --deess --harsh
+   --translate --clip 1.0 --mono 200 --tilt-target -2.1 --qc`. (No bus compression in the
+   default since 2026-10-11 — user: masters sounded compressed. `--comp` stays available opt-in.
+   `--declick` + `--dyneq` removed 2026-10-11 per user revision; both stay available opt-in.) `--declick`/`--dehum 50`
+   run first as a repair safety net (DC + mains hum; no-op when clean). The `--tilt-target -2.1` is the
+   Tilt EQ stage (step 5l), set a little **on the bass side** for modern rock: after the EQ it measures
+   the octave-band slope and tilts only as far as needed (≤3 dB, at 800 Hz) toward the bass-leaning
+   target, skipping itself when already in tolerance. The 2-second lead-in (step 5k) is applied
+   automatically by `master.py`. Keep the ORIGINAL filename — the `mastered/` subdir disambiguates
+   (never a `_master` suffix).
+3. **MP3** — `scripts/export_mp3.py <project>/mastered/<name>.wav <project>/mp3/<name>.mp3`
+   (48 kHz / 320k-ceiling VBR / 16-bit; Xing header injected; duration gate enforced — step 5g).
+4. **Tags (mandatory)** — Title = filename minus extension. For the album-level tags, FIRST read an
+   existing SIBLING `.mp3` in the destination `mp3/` folder and copy its TALB/TPE1/TPE2/TCOM/TDRC;
+   only if no sibling MP3 exists, fall back to **Album = the project ROOT dir name** (house
+   Artist/AlbumArtist/Composer `Zack Yusof`, Year = current year verified live). `export_mp3.py`
+   performs this sibling-inheritance automatically; `--album/--artist/--composer/--year` override.
+5. **Verify** — album gate (step 5g): `src wav count == mastered count == mp3 count` AND every MP3
+   duration == its source; confirm the whole album's MP3 tag set is identical. Then persist (step 6).
+
+The keyword does **not** opt into the optional stages (declick, spectral-smooth, stem space, width) —
+those stay off unless the user names them (step 4c). Create `mastered/`/`mp3/` if they do not exist.
+If a **profile** is named ("run the pipeline, prog-metal") add `--profile <name>` — it supplies the target
+LUFS/slope and the chain (see Profiles below). If NO profile is named, use **`modern-rock`
+automatically (user directive 2026-10-11: the house default — run immediately, NEVER ask)**.
+Only present profile/stage options when the user explicitly asks for them.
+
+## Profiles — default is `modern-rock`, options only on request (revised 2026-10-11)
+
+When the user says **"run the pipeline"** (or "default pipeline") and names no profile, use
+**`modern-rock` automatically and run immediately — NEVER ask, NEVER present a menu** (user
+directive 2026-10-11). A profile sets the chain + sonic targets; `master.py --profile <name>`
+applies it and **explicit user flags override it**. Present profile/stage options ONLY when the
+user explicitly asks ("what are my options", "show me the chain", "which profile").
+Inspect with `scripts/profiles.py list` / `show <name>` / `args <name>`.
+
+**Honesty:** these are **NOT** any engineer's real chain (proprietary craft). Each is a **model** built
+from published credits, studio gear lists, interviews and stated philosophy, with **our own** measurable
+targets. Use them as style targets — never claim we replicate a named engineer.
+
+| profile | archetype | genre | LUFS / TP | slope dB/oct | tilt pivot |
+|---|---|---|---|---|---|
+| `modern-rock` | house baseline | modern rock | −14.0 / −1.0 | −2.1 | 800 |
+| `preferred` | researched consensus (2026-10-11) | modern rock | −14.0 / −1.0 | −2.1 | 800 |
+| `gateway` | Bob Ludwig (Gateway) | classic / art rock | −14.0 / −1.0 | −1.8 | 800 |
+| `sterling` | Ted Jensen (Sterling) | rock / metal | −13.5 / −1.0 | −1.6 | 900 |
+| `laporta` | Joe LaPorta (Sterling) | alt / pop-rock | −14.0 / −1.0 | −1.7 | 800 |
+| `audiosiege` | Brad Boatright (Audiosiege) | punk / hardcore / metal | −13.5 / −1.0 | −1.5 | 800 |
+| `bogren` | Jens Bogren (Fascination St) | modern metal | −14.0 / −1.0 | −1.6 | 800 |
+| `golden` | John Golden (Golden) | indie / garage | −14.5 / −1.0 | −2.0 | 800 |
+| `lambert` | Joe Lambert | rock / americana | −14.0 / −1.0 | −1.8 | 800 |
+| `pop` | genre target | pop / pop-rock | −14.0 / −1.0 | −1.4 | 800 |
+| `prog-metal` | Andy Sneap / Rich Chycki (Dream Theater) | progressive metal | −13.5 / −1.0 | −1.6 | 800 |
+| `metal` | genre target | modern metal | −13.5 / −1.0 | −1.5 | 800 |
+
+**Which profile? (quick pick — ask by genre first, then sanity-check with `tilt.py --measure`)**
+
+| want | profile |
+|---|---|
+| classic / art rock, max dynamics + translation | `gateway` |
+| modern rock band (guitars + vox must cut) | `modern-rock` (or researched-consensus `preferred`) |
+| major-label rock / metal, louder, precision | `sterling` |
+| alt / indie / pop-rock, punchy + wide + streaming | `laporta` |
+| punk / hardcore / metal / doom, saturated + dense | `audiosiege` |
+| modern metal (djent / metalcore), organic but tight | `bogren` (hotter: `metal`) |
+| prog metal / Dream Theater lineage | `prog-metal` |
+| indie / garage / lo-fi, warmth + keeps dynamics | `golden` |
+| rock / americana, low-end weight + guitar presence | `lambert` |
+| radio pop / pop-rock, bright + tight + wide | `pop` |
+
+**Measurement hints:** `tilt.py --measure` slope < −2.3 dB/oct = dark/heavy → lean `golden`/`lambert`;
+slope > −1.5 = already bright → lean `sterling`/`gateway` (not `pop`/`audiosiege`). Unknown genre → use the
+**closest** profile and **say so**; nothing fits → `modern-rock`. List/show from either entry point:
+`master.py --list-profiles` or `profiles.py list | guide | show <name> | args <name>`.
+
+Full per-profile basis, gear and chain live in `scripts/profiles.py` (`show <name>`).
+
+### What is actually documented about each archetype (sourced 2026-10-11)
+- **Bob Ludwig / Gateway** (Portland ME 1992–2023, now retired; 13 Grammys; **AES Gold Medal 2015**; MFiT
+  consultant; 7,892 Discogs credits). Credits: Led Zeppelin, Queen, Metallica, Springsteen, Nirvana,
+  Radiohead, Tool, Daft Punk. **Signature:** translation-first, dynamic preservation, immaculate low end,
+  no over-limiting.
+- **Ted Jensen / Sterling** (since 1975; Chief ME 1984; 16 Grammy-winning albums; built the first
+  all-digital mastering console, **Neve DTC-1**; Apple MFiT consultant). Credits: Eagles *Hotel California*,
+  Green Day *American Idiot*, Alice in Chains (*The Devil Put Dinosaurs Here* — BEA nom 2014).
+  **Signature:** precision, clarity, loud-but-controlled, mid-forward.
+- **Joe LaPorta / Sterling** (since 2013; **Grammy BEA 2017 *Blackstar***; ROTY 2024 *Flowers*).
+  Credits: Bowie, Foo Fighters, The Weeknd, Imagine Dragons, Miley Cyrus, The Marías.
+  **Signature:** punchy, streaming-ready, wide-but-mono-safe.
+- **Brad Boatright / Audiosiege** (Portland). **Published gear:** Manley Massive Passive ME, Dangerous
+  Bax, custom Sontec/Massenburg **DR-MQ5**, Dave Hill Titan, Foote P3EX, Rocksonics MB-3X ×2, Aphex
+  Dominator II ×2, Louder Than Liftoff Silver Bullet, custom **"Massive Aggressor"** diode saturator;
+  JBL LSR6332 + sub. **Signature:** saturated, dense, harmonic-rich, loud (punk/hardcore/metal).
+- **Jens Bogren / Fascination Street** (Örebro). Producer-mixer-master; stated philosophy *"warmth of
+  analog with the precision of digital … organic, clear, full of life"*; Holonor-designed room.
+  **Signature:** organic + clear, powerful, tight, modern metal.
+- **John Golden / Golden Mastering** (Ventura, est. 1993; family-run; Neumann VMS-70 lathe).
+  **Signature:** organic warmth, weight, keeps dynamics; indie/garage/underground + vinyl.
+- **Joe Lambert / Joe Lambert Mastering** (Westchester NY). **Published gear:** Maselec MTC-1X + MLA-4 +
+  2012 limiter, Manley Massive Passive + Variable Mu, Weiss EQ1, Sontec MES-431C, Anamod tape sim;
+  KEF 207.2 full-range. Apple Digital Masters approved. **Signature:** weighted low end + guitar presence,
+  analog, headroom-first (*"leave headroom … not necessary to make your mixes loud"*). *(Note: "Truphonic"
+  is Vlado Meller's studio — not Lambert's.)*
+- **Dream Theater / prog-metal** — *A View from the Top of the World* (2021) was **mixed AND mastered by
+  Andy Sneap**; *Dream Theater* (2013) was mixed by **Richard Chycki** on an SSL Duality (hybrid DAW+analog;
+  UAD SSL 4000, Sonnox Oxford EQ as his "workhorse"). Chycki's documented DT technique: guitars split via a
+  Radial JD7 into multiple mics, **Petrucci doubles everything, 3–12 guitar tracks/song + DI**; **40+ mics**
+  on the kit with phase/leakage control so it reads as *one* instrument; priority = **separation + clarity
+  inside density + power**; monitors under 90 dB. This is the model for the `prog-metal` profile.
+
+**Method: extrapolating data from written analyses (no audio needed).** Published credits + studio gear
+lists + engineer interviews + stated philosophy give real, citable inputs — enough to set module *direction*
+and genre doctrine even without reference audio. What it does NOT give is *measured* target curves; those
+still need reference audio (see the calibration note below). Do not present extrapolated numbers as measured.
+
+**Module settings are per-profile.** `master.py` now accepts stage knobs, and `profiles.py` carries them:
+`--comp-ratio/--comp-attack/--comp-release/--comp-gr` (glue comp), `--color-drive/--color-mix` (saturation),
+`--deess-f0/--deess-range`, `--clip`. Genre doctrine encoded: **metal/prog-metal → minimal comp, long
+attack / short release (50 ms / 120 ms), less saturation on already-distorted material**; **indie/organic →
+heavier glue, fast attack / slow release (5 ms / 400 ms), more colour**; pop/rock in between.
+
 ## Environment (verified 2026-10-10 on opencode-bart)
 
 - macOS `afinfo` / `afconvert` for format probe + compressed-to-WAV conversion
 - Python stdlib `wave` + `numpy` + `scipy` (NO librosa/matplotlib/ffmpeg — do not assume them; `pip install` only if the task needs spectrogram images)
 - 24-bit WAV: parse manually via `wave` + int64 assembly (see script). Float32 WAV: `scipy.io.wavfile.read`
-- Scripts live in this skill dir: `scripts/analyze_audio.py`, `scripts/eq_demo.py`, `scripts/anti_alias.py` (alias diagnostic), `scripts/linear_phase_eq.py`, `scripts/mid_side.py`, `scripts/qc_report.py`, `scripts/codec_check.py`, `scripts/dehum.py`, `scripts/transient.py`
+- Scripts live in this skill dir: `scripts/analyze_audio.py`, `scripts/eq_demo.py`, `scripts/tilt.py` (see-saw tonal balance), `scripts/profiles.py` (named mastering profiles), `scripts/anti_alias.py` (alias diagnostic), `scripts/linear_phase_eq.py`, `scripts/mid_side.py`, `scripts/qc_report.py`, `scripts/codec_check.py`, `scripts/dehum.py`, `scripts/transient.py`
 
 ## Workflow (MUST, in order)
 
@@ -60,14 +190,16 @@ If mix-vs-stem is truly ambiguous, SAY SO and give both readings.
 - Minimum-phase filtering only (`sosfilt`/`lfilter`) — zero-phase `filtfilt` inflated peaks to 1.26.
   RMS-match is MANDATORY for fair A/B; soft-clip (tanh knee >0.95) transients only, ceiling 0.99.
 
-### 4c. Ask for optional processing before any render or repair
-After probe/diagnosis and before changing audio, present **one compact menu** with every available
-stage group and ask which to add or change. Do this once per song/batch, not once per track. An
-explicit user choice in the current request counts as an answer; do not ask again for that choice.
+### 4c. Optional processing menu — ONLY on request (revised 2026-10-11)
+When the user asks to run mastering (default pipeline / run the task) WITHOUT asking for options,
+SKIP this menu entirely and run the house default immediately. Present the menu below ONLY when the
+user explicitly asks for options ("what are my options", "show me the chain", "which stages").
+An explicit user choice in the current request counts as an answer; do not ask again for that choice.
 If the user says "defaults", "none", or chooses no additional stages, run the existing skill-default
-chain unchanged: `--lufs -14 --tp -1.0 --eq --deess --harsh --dyneq --translate --clip 1.0
---comp --mono 200` (plus `--qc` for verification). The new repair, smoothing, and space options
-are **off** by default. Do not infer them from the filename or a spectrogram.
+chain unchanged: `--lufs -14 --tp -1.0 --eq --deess --harsh --translate --clip 1.0
+--mono 200 --dehum 50 --tilt-target -2.1` (plus `--qc` for verification; no `--comp` — removed
+from the default 2026-10-11, opt-in only; `--declick`/`--dyneq` likewise removed 2026-10-11). The new repair, smoothing, and
+space options are **off** by default. Do not infer them from the filename or a spectrogram.
 
 Menu to show, with current/default values visible:
 1. **Repair:** short click/pop interpolation (`--declick`), DC/hum (`--dehum 50|60`), gentle
@@ -92,9 +224,11 @@ rendering, repair, separation downloads, and writes wait for the answer. If the 
 already authorizes defaults, proceed immediately with the default preset.
 
 ### 5. Demo render (only when the diagnosis supports it, or user asks)
-Run `scripts/eq_demo.py <in.wav> <out.wav> [options]`. Default chain (conservative full-mix mud fix):
-HPF 28 Hz 24dB/oct, +0.8 dB @ 90 Hz Q1.0, −1.5 dB @ 150 Hz Q1.2, −3.5 dB @ 270 Hz Q0.9,
-+2.0 dB @ 3.2 kHz Q0.9, +2.5 dB highshelf @ 10.5 kHz.
+Run `scripts/eq_demo.py <in.wav> <out.wav> [options]`. Default chain (conservative full-mix mud fix,
+revised 2026-10-11 from published master-bus guidance — violetrecording, Music Guy Mixing 2024, MixMasterAI
+rock, Orphiq, MasteringBOX; all moves ≤2 dB):
+HPF 28 Hz 24dB/oct, +0.8 dB @ 90 Hz Q1.0, −1.5 dB @ 270 Hz Q0.8, −1.0 dB @ 500 Hz Q1.0,
++1.5 dB highshelf @ 10.5 kHz. Presence comes from `--tilt-target` + `--dyneq`, not a static 3 kHz boost.
 MUST RMS-match to source, soft-clip only overs above 0.95 (tanh knee), ceiling 0.99.
 MUST re-run `spectrum` on the render and report before→after deltas. Never overwrite the source — always a new `*_EQdemo.wav`.
 
@@ -110,7 +244,7 @@ Toolchain (ONE entry point, same on every agent/host):
   attenuation-only narrow-peak smoothing (0<N<=3 dB). They never run unless chosen.
   `--eq` skill-default EQ (raw mixes only); `--clip N` soft-clip pre-makeup; `--deess` split-shelf 7kHz/2.5dB first-insert;
   `--harsh` dynamic resonance tamer (2-8kHz, top-3 peaks prom≥8dB, range 2dB/peak total cap 4dB, skips clean material);
-  `--dyneq` whole-song dynamic EQ (2s ticks vs song-median target, cuts-only cap 2dB, 3-tick smoothing, filter-bank gains — fixes sections, never the average; sub/thump excluded); `--translate` low-end translation (three zones: sub felt / body 60-200 heard-everywhere / 200-500 harmonics;
+  `--dyneq` whole-song dynamic EQ (2s ticks vs song-median target, cuts-only cap 1dB, 3-tick smoothing, filter-bank gains — fixes sections, never the average; sub/thump excluded); `--translate` low-end translation (three zones: sub felt / body 60-200 heard-everywhere / 200-500 harmonics;
   sub>12% -> broad trim cap 2dB @45Hz + always lite parallel tube ghost 60-250Hz mix 0.25 for psychoacoustic bass;
   balanced tracks pass through; per-channel, RMS-match); `--clip N` pre-limiter transient shave (~1dB limGR per 0.5 clip);
   escalation: limGR >4 after clip 1.0 → clip 1.5 → max 2.0; if still >4.5, physics wall — ship + report shortfall
@@ -119,7 +253,7 @@ Toolchain (ONE entry point, same on every agent/host):
   `--color pultec|tape15|tube|transformer` vintage box drive 0.5 mix 0.5 parallel; `--mono F` + `--width` (1.0 = off);
   `--sidehpf 90` gentler alternative to `--mono` (HPFs side channel only, keeps 90–200 Hz width);
   `--dither16` TPDF 2LSB int16, LAST, CD only.
-  Standalone `dynamic_eq.py` (--tick 2.0 --cap 2.0 --csv ticks.csv; validated gated synth: mud/bite cuts track sections, verse +0.2dB, RMS identical).
+  Standalone `dynamic_eq.py` (--tick 2.0 --cap 1.0 --csv ticks.csv; validated gated synth: mud/bite cuts track sections, verse +0.2dB, RMS identical).
   Standalone `translate.py` (validated: 23.5%sub->18.7% trim -1.72dB RMS-identical; balanced 6.7%->6.7% pass-through).
   Standalones: `deesser.py`, `glue_comp.py` (warns >3dB), `stereo_tool.py` (mono-LR4 or side-HPF mode, warns corr<0.3), `dither.py`,
   `vintage_color.py` (--flavor --drive 0-1 --mix), `multiband.py`, `ref_match.py` (--amount 0.6 --maxdb 2.5), `harshness.py` (--zone --peaks 3 --range 2.0 --prom 8),
@@ -166,6 +300,34 @@ Order: gain stage (peaks −6..−3 in) → corrective EQ (HPF 20–30, mud −1
   `_master` suffix. Dither ONLY when reducing to 16-bit CD. Always A/B against a LEVEL-MATCHED reference.
 - Five classic failures: limiter-only loudness (6 dB+ GR), no reference, over-widening (mono collapse),
   boosting instead of cutting, untreated room before plugin shopping.
+
+**Standards & award criteria (researched 2026-10-11).** There is NO published "mastering-chain whitepaper"
+— chains are craft, shared via interviews/education, not papers. The documents that DO exist are standards
+and peer-reviewed research:
+- **AES TD1004.1.15-10** (AES Technical Council, ed. Bob Katz; writers incl. J. Johnston, T. Lund, R. Orban)
+  — *Recommendation for Loudness of Audio Streaming and Network File Playback*: Target Loudness **≤ −16
+  LUFS** and **not below −20 LUFS**, max peak **−1.0 dBTP**, short-form ≤ 5 LU above target. This is the
+  canonical streaming-loudness doc; it defines the LUFS/LU vocabulary over **ITU-R BS.1770**.
+- **ITU-R BS.1770** (loudness algorithm) + **EBU R 128** / **EBU Tech 3341–3343** (production loudness,
+  gating, meter modes).
+- **Apple Digital Masters** spec — the de-facto commercial deliverable spec.
+- Research: Earl Vickers, *The Loudness War: Background, Speculation, and Recommendations* (AES 129th
+  Convention, 2010); Serra et al., *Measuring the Evolution of Contemporary Western Popular Music*
+  (*Scientific Reports*, 2012) — peer-reviewed sources on loudness/dynamics compression.
+- **Scope note:** AES TD1004 targets *streams* (−16…−20 LUFS). Music-on-demand masters ship hotter
+  (~−14 LUFS-I) and are normalised down — see 5b/5c. Do not conflate the two.
+
+**What "Grammy-award-worthy" (by engineering merit) means.** There is **no rock-specific mastering
+Grammy**; the engineering awards are genre-agnostic:
+- **Best Engineered Album, Non-Classical** — credited to the engineer(s) **and the mastering engineer**
+  (mastering added 2012). Judged explicitly on **"the finished product, overall mix, unique techniques,
+  quality of sound, and trueness of reproduction"** (Recording Academy) — i.e. engineering craft, not
+  artist sales. 2026 (68th) winner: *That Wasn't A Dream* — Joseph Lorge & Blake Mills (engineers),
+  **Pat Sullivan** (mastering engineer).
+- **Best Immersive Audio Album** — credits the **Immersive Mix Engineer**, **Immersive Mastering Engineer**
+  and Immersive Producer; requires ≥ 4 channels.
+That rubric (tonal truth, translation, dynamics, low-end, mono-safety) is exactly what `qc_report.py`
+measures — use it as the craft checklist.
 
 ### 5d. Fletcher-Munson / equal loudness (added 2026-10-10: Fletcher-Munson 1933 -> Robinson-Dadson 1956 -> ISO 226:2003, ed. 2023 equivalent; iZotope + Tonalux doctrine)
 The ear is not a flat mic: ~3-4kHz ear-canal resonance = peak sensitivity (exactly our harshness zone);
@@ -337,6 +499,106 @@ on one stem would break multitrack alignment. Final delivery goes through `maste
 `export_mp3.py`. The -80 dBFS detector is a conservative technical boundary, not a musical
 judgment; inspect a very quiet fade-in before delivery.
 
+### 5l. Tilt EQ — one see-saw for macro tonal balance (researched 2026-10-11)
+
+**What it is.** A tilt EQ is a single control that pivots the whole spectrum around a centre
+frequency: one end rises while the other falls by the same amount, tracing a see-saw/slope. It is
+NOT two independent shelves — the low and high moves are locked together. Lineage: Peter Baxandall's
+1950s hi-fi tone controls → the "slope/tilt" control; the canonical digital form is the musicdsp.org
+"Niveau filter" / Ivanov 2009 *Simple Tilt Equaliser* — split with a one-pole low-pass, then apply
+opposing gains to the low and high halves.
+
+**Why engineers use it** (Production Expert, PSPaudioware Tilt-Q, iZotope, recordmixandmaster):
+- **Natural** — changes overall balance without breaking the timbre relationship; avoids the
+  brighten→thin / lift-lows→dull rabbit hole of stacked narrow moves.
+- **Fast / fewer decisions** — one question ("warmer or brighter?") replaces N band decisions; the
+  go-to for a mix/bus that is globally too dark, bright, heavy or lean.
+- **Phase-friendly** — a complementary first-order split uses fewer overlapping bands than a
+  multi-band EQ, so the phase response is tidier (not zero-phase, just smoother).
+- Macro only: it does NOT remove resonances or fix problem frequencies — pair it with corrective EQ.
+
+**Pivot point** (recordmixandmaster; MFC default 800 Hz for guitar):
+| source | pivot |
+|---|---|
+| full mix / master bus | 500 Hz–1 kHz (default **800 Hz**) |
+| vocals | 1–2 kHz (male ~1 kHz, female ~2 kHz) |
+| electric guitar | 500 Hz–1.5 kHz |
+| bass | 100–200 Hz |
+| drums | 300 Hz–1 kHz |
+Move the pivot lower → acts like a broad low-end control; higher → presence/sparkle control.
+
+**Amount.** Musical range ±2–3 dB; **mastering tonal EQ rarely exceeds ~1.5 dB** on a broad shelf
+(mixingandmastering.ai). Extremes (±6 dB) are sound design, not mastering. Tilt is a *finishing*
+move — corrective first, tilt last before the limiter; recheck loudness and low-end headroom after,
+because a tonal change moves how the limiter reacts.
+
+**Modern rock, through a tilt lens** (MixMasterAI rock profile):
+- Delivery: **−14 LUFS-I / −1 dBTP** (Spotify/YouTube/Tidal/Amazon; Apple −16, SoundCloud −11),
+  dynamic range 8–12 LU (rock often 7–10).
+- The rock EQ profile is exactly a tilt job: **cut 250–400 Hz** (boxy guitar cabs + drum shell),
+  **boost 2–5 kHz** (guitar/vocal cut-through), kick 60–80 Hz, snare 200 Hz, cymbal air 10 kHz.
+  A single upward tilt around ~800 Hz–1 kHz does much of that at once — brightens the guitars/vox
+  and leans the low-mid out — which is why tilt is a common rock master-bus move.
+- Because rock is guitar-and-drum driven, ~**800 Hz** is the fulcrum; a dark, bass-heavy rock mix
+  (low spectral slope, low centroid) is the classic candidate for a mild upward tilt.
+
+**Our tools.**
+- `tilt.py <in.wav> <out.wav> --tilt DB [--pivot HZ] [--skew G]` — RMS-matched render, minimum-phase,
+  ceiling-only soft-clip. `--tilt T` = total spread (low −T/2, high +T/2·skew). Standalone preview.
+- `tilt.py --measure <in.wav> [--pivot HZ] [--target-slope S]` — reports the octave-band **slope in
+  dB/oct over 125 Hz–8 kHz**, the **curvature** (mid-vs-edge residual; <0 = mid scoop "smiley/V",
+  >0 = mid hump "frown"), and balance either side of the pivot; with `--target-slope` it prints the
+  tilt needed to reach it. Use it to compare a mix against a master/reference before choosing.
+- `master.py --tilt N --pivot HZ --skew G` — applied after corrective EQ, before dynamics/limiter.
+- `master.py --tilt-target S` — the DEFAULT-pipeline form: measure the post-EQ slope and tilt (≤3 dB,
+  at 800 Hz) only as far as needed to reach S dB/oct, skipping when already within 0.25 dB/oct.
+  The pipeline default is **`--tilt-target -2.1`** — deliberately a little **on the bass side** for
+  modern rock (the darker end of the observed house band −1.58…−2.12). Rationale: a mild *downward*
+  (bass-forward) balance is the accepted preference for music/room targets (~1 dB/oct down;
+  HouseCurve / loudspeakers.audio — "flat is the wrong target"), iZotope Tonal Balance Control ships a
+  **"Bass Heavy"** factory curve, and equal-loudness (5d) under-hears lows at normal level. **Honesty
+  fix:** Schedin's DiVA thesis *Target Spectrums For Mastering* (Luleå, 2021) only shows rock vs
+  vocal-electronic differ *"especially in the low end"* — a genre convention exists; it does **not**
+  say rock should be bass-leaning. Do not over-claim it. A dark, bass-heavy mix still gets a real
+  upward tilt; an already-bright one gets little or none (clamped ≤3 dB).
+
+**Smiley face vs tilt (researched 2026-10-11).** The **"smiley face" curve** (Wikipedia *Smiley face
+curve*; Joe Gore / Premier Guitar calls it the "stoner vee") is a **curvature**, not a tilt: boosted
+lows AND highs with a scooped midrange (≈400 Hz–1 kHz). A tilt is a linear slope and **cannot** create
+a V — you need a bell/shelf carve. The smiley is really three overlapping phenomena, none of which is
+modern-rock *mastering* doctrine: (a) **loudness/equal-loudness compensation** — it approximates the
+Fletcher-Munson contour, which is why it is the classic "Loudness" button and consumer "Rock"/car-stereo
+preset (see 5d); (b) an **'80s rock guitar** archetype and the **modern metal rhythm** scoop
+(cut ≈400–800 Hz, boost ≈120 Hz + 3.2 kHz); (c) an **electric-bass beat** (Wikipedia: "smiley face" is
+popular with car-audio, DJs, bass players, home-stereo owners). For guitar-driven **modern rock masters**
+the doctrine is the opposite of a full V: a *mild* low-mid cut (250–400 Hz) plus a presence lift
+(2–5 kHz) and kick/air — a gentle *partial* smile, because the midrange is where guitars and vocals cut
+through. Measured on the Vol. 4 masters, curvature is −1.7…+0.9 dB (mean ≈ **−0.6**) — mildly scooped,
+not an extreme V.
+
+**Calibration — what is and isn't "proven" (2026-10-11).** Tilt is a recognized EQ *shape* — it is a
+filter type in mastering-grade EQs (FabFilter Pro-Q, PSP Tilt-Q, iZotope Ozone/Tonal Balance) and the
+Baxandall/Niveau lineage is standard DSP. Working-engineer/education sources endorse it as a *macro
+tonal-balance utility*. But it is **NOT a named standard stage in the mainstream mastering-chain
+canon** — the published pro chains (mastering.com "Pro Mastering Chain"; MasteringBOX "Equalization in
+Mastering") omit it, listing corrective EQ → glue comp → tonal EQ → dynamics → limiting. Treat tilt as
+an **optional utility, not doctrine**. And separate the *technique* from *this implementation*: the
+`tilt.py` construction, the 800 Hz pivot, the ±3 dB clamp and especially the `--tilt-target -2.1`
+default are **our house choices**, self-verified by tests/measurements only — **not vetted by any
+mastering engineer**. The only real proof is a level-matched A/B on the material (5c); if the default
+tilt does not improve it, turn it off.
+
+**Verified (2026-10-11, Vol. 4 mixes):** `--tilt ±3` @ 800 Hz moves the measured slope by ±0.54
+dB/oct; a +12 tilt measures −5.4 dB lows / +6.0 dB highs (exact ±T/2). `tests/test_tilt.py` covers
+identity, extreme gains, slope sign and pivot neutrality. Observed: the Vol. 4 source mixes slope
+~−2.4…−2.9 dB/oct and the mastered versions ~−1.6…−2.1 dB/oct (mastering added ~+0.7 dB/oct).
+
+**Sources:** production-expert.com "Why Tilt EQ Is Your Friend"; pspaudioware Tilt-Q;
+recordmixandmaster "Tilt EQ — How to Find the Center Frequency"; myfatherscravat "Tilt: The Knob…"
+(musicdsp Niveau implementation); mixingandmastering.ai "Tonal Balance in Mastering"; mixmasterai.co
+rock mastering; dawzone "7 Legendary Analog EQ Units"; mouseplugins Sontec MES-432; Wikipedia "Smiley
+face curve"; Joe Gore / Premier Guitar "Is It a Sin to Scoop Your Mids?" (the "stoner vee").
+
 ### 6. Persist
 Log one `action` memory entry (file, key numbers, demo path). Report concisely: table + fix list, no superlatives.
 
@@ -453,8 +715,8 @@ def rbj_hshelf(f0, g, sr, S=0.9):
     t = [(A+1) - (A-1)*a + 2*np.sqrt(A)*al, 2 * ((A-1) - (A+1)*a), (A+1) - (A-1)*a - 2*np.sqrt(A)*al]
     return np.array(b) / t[0], np.array(t) / t[0]
 
-CHAIN = [("peak", 90, 0.8, 1.0), ("peak", 150, -1.5, 1.2), ("peak", 270, -3.5, 0.9),
-         ("peak", 3200, 2.0, 0.9), ("hshelf", 10500, 2.5, 0.9)]
+CHAIN = [("peak", 90, 0.8, 1.0), ("peak", 270, -1.5, 0.8), ("peak", 500, -1.0, 1.0),
+         ("hshelf", 10500, 1.5, 0.9)]
 
 def main(src, dst):
     y, sr = load(src)
@@ -490,7 +752,7 @@ if __name__ == "__main__":
 | Demo quieter than source | RMS-match step skipped — never ship without it; louder always sounds "better" |
 | Reference-matching overshoots | Apply ~60% of measured band deltas, caps ±2.5 dB. NEVER match a mastered ref's lows blindly (commercial masters scoop sub); NEVER chase top octave of an MP3 ref (codec-compromised); match tonal balance only, never loudness. If ref mud ≈ mix mud, skip the mud cut entirely |
 | `default.websearch` fails mid-research | Use SearXNG skill (`web_search.py`) fallback, never stop the task |
-| MP3 Album tag ≠ siblings after a project-folder rename | `export_mp3.py` derives Album from the source's parent dir; if the project dir was renamed mid-project (e.g. a project dir renamed mid-project), READ a sibling tag first and pass `--album "<exact sibling value>"` — never trust the current folder name |
+| MP3 Album tag ≠ siblings after a project-folder rename | `export_mp3.py` now auto-inherits the album-level tags (TALB/TPE1/TPE2/TCOM/TDRC) from an existing sibling `.mp3` in the destination folder, falling back to the project ROOT dir name only when no sibling exists — so a renamed project dir no longer mis-tags. Still pass `--album "<exact value>"` when tagging the FIRST file of an album whose folder name ≠ the intended album tag |
 | Album reported N/N but source has MORE tracks | Before declaring an album done assert `src wav count == mastered wav count == mp3 count`; a track added after the batch is silently missed (BOD logged 11/11 with a 12th source present). Recover the batch's exact flags from `~/.local/share/opencode/log/opencode.log` ("spawning process") and reuse them verbatim for a consistent sibling |
 | Metallic/gritty ring over bright hats, cymbals, sibilance or a full mix after clipping/saturation | alias fold (see 5h) — measure with `anti_alias.py --stage <clipper\|hardclip\|softclip>`; lower the drive (`--clip` shave) and/or oversample the nonlinear core ×4; if brightening, do it AFTER the clipper |
 | Full master blows up (huge TP, RMS collapsed) after `--multiband` on material with quiet gaps | multiband gain ride spiked on a near-zero band sum — fixed 2026-10-10 (floor + ±6 dB cap). If it recurs, lower the multiband target GR |
@@ -513,3 +775,10 @@ question is conditional, measured on our own chain (mem #23712). Corrected same 
 **waveshapers vs time-varying gain**, not "nonlinear vs linear" — dynamics (`glue_comp`/`multiband`/`dynamic_eq`/
 `deesser`/`harshness`) do NOT alias (glue_comp measured −154.8 dB out-of-band); only `soft_clip`, `vintage_color`
 and the `translate` low-band tube sat do (mem #23716).
+Extended 2026-10-11: documented the **"default pipeline"** keyword (analyze → default-flags master →
+MP3 → sibling-inherited tags → album gate) and taught `export_mp3.py` to inherit album-level tags
+from an existing sibling MP3 instead of trusting the folder name.
+Extended 2026-10-11: 5l **Tilt EQ** section + `tilt.py` (Baxandall/Niveau see-saw; `--measure`
+slope in dB/oct) wired into `master.py` (`--tilt/--pivot/--skew`, and `--tilt-target` — the
+target-slope auto form now part of the default pipeline) + `tests/test_tilt.py`.
+Sources and the rock-application numbers are cited inline in 5l.

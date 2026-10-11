@@ -15,11 +15,12 @@ stand alone anywhere Python runs. **28 scripts**, one entry point (`master.py`).
 | Group | Modules |
 |---|---|
 | **Analysis** | `analyze_audio.py` (probe / 9-band spectrum / timeline), `stem_space.py` (aligned-stem overlap and chosen EQ/pan), `perceived.py` (Fletcher‑Munson / ISO 226 ear-weighted), `anti_alias.py` (aliasing / oversampling diagnostic) |
-| **Tonal** | `eq_demo.py` (minimum-phase corrective EQ), `linear_phase_eq.py` (zero-phase / linear-phase EQ), `dynamic_eq.py` (whole-song dynamic EQ), `ref_match.py` (reference tonal match), `vintage_color.py` (Pultec/tape/tube/transformer colour) |
+| **Tonal** | `eq_demo.py` (minimum-phase corrective EQ), `linear_phase_eq.py` (zero-phase / linear-phase EQ), `tilt.py` (see-saw macro tonal balance, `--measure` slope), `dynamic_eq.py` (whole-song dynamic EQ), `ref_match.py` (reference tonal match), `vintage_color.py` (Pultec/tape/tube/transformer colour) |
 | **Dynamics** | `deesser.py`, `harshness.py` (dynamic 2–8 kHz resonance tamer), `glue_comp.py` (bus glue), `multiband.py` (4-band glue), `transient.py` (attack/sustain punch) |
 | **Spatial** | `mid_side.py` (true M/S EQ + width + mono-below), `stereo_tool.py` (mono lows / side-HPF + width + mono check), `translate.py` (low-end translation) |
 | **Level & output** | `limiter.py` (lookahead brickwall), `lufs_meter.py` (BS.1770), `dither.py` (TPDF, CD only), `lead_in.py` (2-second delivery lead), `export_mp3.py` (320k VBR + Xing + ID3v2.3), `xing_header.py` (repair VBR headers) |
 | **QC & repair** | `qc_report.py` (delivery QC + streaming forecast), `codec_check.py` (AAC/MP3 lossy gate), `dehum.py` (DC + mains-hum notch), `spectral_repair.py` (short clicks/pops and bounded peak smoothing) |
+| **Profiles** | `profiles.py` (named presets — `gateway`, `sterling`, `laporta`, `audiosiege`, `bogren`, `prog-metal`, `golden`, `lambert`, `modern-rock`, `pop`, `metal`; per-profile module knobs; `guide` shows pick-by-genre) | `master.py --profile <name>` / `master.py --list-profiles`; explicit flags override |
 
 ## Requirements
 
@@ -139,8 +140,8 @@ Examples (run from the repository root; create the destination directories first
 python3 scripts/spectral_repair.py "../My Album/Track 01.wav" "../My Album/Track 01 repaired.wav" \
   --declick --smooth-db 1.5
 python3 scripts/master.py "../My Album/Track 01.wav" "../My Album/mastered/Track 01.wav" \
-  --lufs -14 --tp -1.0 --eq --deess --harsh --dyneq --translate --clip 1.0 \
-  --comp --mono 200 --declick --spectral-smooth 1.5 --qc
+  --lufs -14 --tp -1.0 --eq --deess --harsh --translate --clip 1.0 \
+  --mono 200 --tilt-target -2.1 --qc
 
 # With original aligned stems, find collision bands; then render one chosen stem move.
 python3 scripts/stem_space.py analyze "../My Album/stems/Vocal.wav" "../My Album/stems/Guitar.wav"
@@ -154,6 +155,32 @@ source-separation metric. See [the research notes](references/spectral-space-res
 the GitHub projects and method limits.
 
 ## The mastering chain (`master.py`)
+
+### House default — `modern-rock`, auto-applied (revised 2026-10-11)
+
+Runs automatically on every "run the pipeline / default pipeline" request — no profile question,
+no options menu (menus only on explicit request). Opt-in stages (`--comp`, `--dyneq`,
+`--declick`, `--multiband`, `--color`, `--width`, …) stay off unless named.
+
+```bash
+python3 scripts/master.py <in.wav> <project>/mastered/<name>.wav --profile modern-rock \
+  --lufs -14 --tp -1.0 --dehum 50 --eq --deess --harsh --translate --clip 1.0 \
+  --mono 200 --tilt-target -2.1 --qc
+```
+
+| # | Stage | Setting applied |
+|---|---|---|
+| 1 | Dehum | DC removal + 50 Hz ×4 notch (Q ~10–20) |
+| 2 | De-ess | split-shelf 7 kHz, 2.5 dB range, 3:1, first insert |
+| 3 | Harshness tamer | dynamic, 2–8 kHz, top-3 peaks ≥8 dB prominence, 2 dB cap — skips clean material |
+| 4 | Corrective EQ | HPF 28 Hz 24 dB/oct; +0.8 @ 90 (Q1.0); −1.5 @ 270 (Q0.8); −1.0 @ 500 (Q1.0); +1.5 shelf @ 10.5k (all ≤2 dB, published-range revision) |
+| 5 | Tilt (auto) | post-EQ octave slope → −2.1 dB/oct target, ≤3 dB @ 800 Hz, skips within 0.25 |
+| 6 | Low-end translate | sub >12% → −2 dB @ 45 Hz trim + parallel tube ghost 60–250 Hz (mix 0.25); else pass-through |
+| 7 | Clipper | soft-clip 1.0 dB pre-makeup (transient shave) |
+| 8 | Mono lows | LR4 highpass on side < 200 Hz, width 1.0 |
+| 9 | Limiter | −14 LUFS-I / −1.0 dBTP, true-peak auto-margin loop (max 3 passes) + 1 residual makeup pass |
+| 10 | Lead-in | exactly 2.000 s digital silence (trim/pad), assert-verified zeros |
+| 11 | QC + MP3 | `qc_report.py`; MP3 48 kHz VBR ~320k ceiling, Xing header, duration gate, sibling-inherited tags |
 
 Order (doctrine: repair first, clipper before limiter, dither last):
 
@@ -175,11 +202,11 @@ Key defaults:
 
 | Stage | Default |
 |---|---|
-| Corrective EQ | HPF 28, +0.8 @90 / −1.5 @150 / −3.5 @270 / +2 @3.2k / +2.5 shelf @10.5k |
+| Corrective EQ | HPF 28, +0.8 @90 / −1.5 @270 / −1.0 @500 / +1.5 shelf @10.5k (rev. 2026-10-11, all ≤2 dB) |
 | Linear-phase EQ | same curve, zero-phase (constant group delay), for low-end correction |
 | Clipper | soft-clip shave 0.5–2 dB (requested == measured), before makeup |
-| Glue comp | 2.5:1, 30 ms / 250 ms, target ~1.5 dB GR |
-| Multiband | 4-band 1.6/1.5/1.2/1.1, ~1 dB/band |
+| Glue comp | 2.5:1, 30 ms / 250 ms, target ~1.5 dB GR — OPT-IN only (out of default since 2026-10-11) |
+| Multiband | 4-band 1.6/1.5/1.2/1.1, ~1 dB/band — OPT-IN only |
 | Mono lows | LR4 highpass on the side < 200 Hz (or `--sidehpf 90` for a gentler slope) |
 | Limiter | lookahead brickwall, ceiling −1.0 dBTP, true-peak auto-margin loop, 1 residual LUFS pass |
 

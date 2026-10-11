@@ -19,8 +19,11 @@ def rbj_hshelf(f0, g, sr, S=0.9):
     t = [(A+1) - (A-1)*a + 2*np.sqrt(A)*al, 2 * ((A-1) - (A+1)*a), (A+1) - (A-1)*a - 2*np.sqrt(A)*al]
     return np.array(b) / t[0], np.array(t) / t[0]
 
-CHAIN = [("peak", 90, 0.8, 1.0), ("peak", 150, -1.5, 1.2), ("peak", 270, -3.5, 0.9),
-         ("peak", 3200, 2.0, 0.9), ("hshelf", 10500, 2.5, 0.9)]
+# Skill-default corrective EQ (revised 2026-10-11 from published master-bus guidance:
+# violetrecording, Music Guy Mixing 2024, MixMasterAI rock, Orphiq, MasteringBOX —
+# moves capped ≤2 dB, 500 Hz boxiness cut added, static 3.2k presence + 150 cut dropped).
+CHAIN = [("peak", 90, 0.8, 1.0), ("peak", 270, -1.5, 0.8), ("peak", 500, -1.0, 1.0),
+         ("hshelf", 10500, 1.5, 0.9)]
 
 def main(src, dst):
     y, sr = load(src)
