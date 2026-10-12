@@ -40,6 +40,10 @@ class TestProfiles(unittest.TestCase):
     def test_house_baseline_present(self):
         self.assertIn("modern-rock", PROFILES)
 
+    def test_exactly_one_profile_ships(self):
+        """This build ships the single house default - no engineer-derived presets."""
+        self.assertEqual(profile_names(), ["modern-rock"])
+
 
 if __name__ == "__main__":
     unittest.main()

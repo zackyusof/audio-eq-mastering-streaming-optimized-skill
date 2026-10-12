@@ -49,7 +49,12 @@ def translate_array(y, sr):
         pk = float(np.abs(lo).max())
         sat = saturate(lo / max(pk, 1e-9) * 0.9, drive, "tube")
         sat *= float(np.sqrt((lo ** 2).mean())) / max(float(np.sqrt((sat ** 2).mean())), 1e-12)
-        y[:, c] = y[:, c] + (sat - lo) * ghost_mix  # parallel ghost: dry + harmonic difference only
+        # The tube curve is asymmetric (even harmonics), so `sat` carries a DC term. Mixing the raw
+        # difference offsets the whole master (measured +0.0014 on real material, which trips the QC
+        # DC gate). The parallel ghost is wanted only for its harmonics - remove its mean first.
+        d = sat - lo
+        d = d - d.mean()
+        y[:, c] = y[:, c] + d * ghost_mix  # parallel ghost: dry + harmonic difference only, DC-free
     sh1, _, _ = band_share(y, sr)
     return y, sub, sh1["sub 20-60"], sh1["body 400-800"] - sh0["body 400-800"], trim
 

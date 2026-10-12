@@ -52,104 +52,30 @@ questions, no scope debate. Do all of the following in one pass:
 
 The keyword does **not** opt into the optional stages (declick, spectral-smooth, stem space, width) —
 those stay off unless the user names them (step 4c). Create `mastered/`/`mp3/` if they do not exist.
-If a **profile** is named ("run the pipeline, prog-metal") add `--profile <name>` — it supplies the target
-LUFS/slope and the chain (see Profiles below). If NO profile is named, use **`modern-rock`
-automatically (user directive 2026-10-11: the house default — run immediately, NEVER ask)**.
-Only present profile/stage options when the user explicitly asks for them.
+**One profile ships with this tool** — the house default. There is no profile to select:
+run it immediately, never ask. `--profile modern-rock` is accepted and is identical to the
+default; explicit flags override any part of the chain (see Profile below).
 
-## Profiles — default is `modern-rock`, options only on request (revised 2026-10-11)
+## Profile — one default, no selection
 
-When the user says **"run the pipeline"** (or "default pipeline") and names no profile, use
-**`modern-rock` automatically and run immediately — NEVER ask, NEVER present a menu** (user
-directive 2026-10-11). A profile sets the chain + sonic targets; `master.py --profile <name>`
-applies it and **explicit user flags override it**. Present profile/stage options ONLY when the
-user explicitly asks ("what are my options", "show me the chain", "which profile").
-Inspect with `scripts/profiles.py list` / `show <name>` / `args <name>`.
+This build ships a **single profile: the house default**. There are no engineer-derived presets
+and no profile question. Real mastering chains are proprietary craft, and modelling a named
+engineer's chain would misrepresent it, so this tool does not try.
 
-**Honesty:** these are **NOT** any engineer's real chain (proprietary craft). Each is a **model** built
-from published credits, studio gear lists, interviews and stated philosophy, with **our own** measurable
-targets. Use them as style targets — never claim we replicate a named engineer.
-
-| profile | archetype | genre | LUFS / TP | slope dB/oct | tilt pivot |
-|---|---|---|---|---|---|
-| `modern-rock` | house baseline | modern rock | −14.0 / −1.0 | −2.1 | 800 |
-| `preferred` | researched consensus (2026-10-11) | modern rock | −14.0 / −1.0 | −2.1 | 800 |
-| `gateway` | Bob Ludwig (Gateway) | classic / art rock | −14.0 / −1.0 | −1.8 | 800 |
-| `sterling` | Ted Jensen (Sterling) | rock / metal | −13.5 / −1.0 | −1.6 | 900 |
-| `laporta` | Joe LaPorta (Sterling) | alt / pop-rock | −14.0 / −1.0 | −1.7 | 800 |
-| `audiosiege` | Brad Boatright (Audiosiege) | punk / hardcore / metal | −13.5 / −1.0 | −1.5 | 800 |
-| `bogren` | Jens Bogren (Fascination St) | modern metal | −14.0 / −1.0 | −1.6 | 800 |
-| `golden` | John Golden (Golden) | indie / garage | −14.5 / −1.0 | −2.0 | 800 |
-| `lambert` | Joe Lambert | rock / americana | −14.0 / −1.0 | −1.8 | 800 |
-| `pop` | genre target | pop / pop-rock | −14.0 / −1.0 | −1.4 | 800 |
-| `prog-metal` | Andy Sneap / Rich Chycki (Dream Theater) | progressive metal | −13.5 / −1.0 | −1.6 | 800 |
-| `metal` | genre target | modern metal | −13.5 / −1.0 | −1.5 | 800 |
-
-**Which profile? (quick pick — ask by genre first, then sanity-check with `tilt.py --measure`)**
-
-| want | profile |
+| | |
 |---|---|
-| classic / art rock, max dynamics + translation | `gateway` |
-| modern rock band (guitars + vox must cut) | `modern-rock` (or researched-consensus `preferred`) |
-| major-label rock / metal, louder, precision | `sterling` |
-| alt / indie / pop-rock, punchy + wide + streaming | `laporta` |
-| punk / hardcore / metal / doom, saturated + dense | `audiosiege` |
-| modern metal (djent / metalcore), organic but tight | `bogren` (hotter: `metal`) |
-| prog metal / Dream Theater lineage | `prog-metal` |
-| indie / garage / lo-fi, warmth + keeps dynamics | `golden` |
-| rock / americana, low-end weight + guitar presence | `lambert` |
-| radio pop / pop-rock, bright + tight + wide | `pop` |
+| LUFS-I / dBTP | **−14.0 / −1.0** |
+| tonal slope | **−2.1 dB/oct** (a little on the bass side) |
+| chain | dehum 50 → EQ → de-ess → harshness → low-end translation → soft-clip 1.0 → mono <200 Hz → tilt toward −2.1 |
 
-**Measurement hints:** `tilt.py --measure` slope < −2.3 dB/oct = dark/heavy → lean `golden`/`lambert`;
-slope > −1.5 = already bright → lean `sterling`/`gateway` (not `pop`/`audiosiege`). Unknown genre → use the
-**closest** profile and **say so**; nothing fits → `modern-rock`. List/show from either entry point:
-`master.py --list-profiles` or `profiles.py list | guide | show <name> | args <name>`.
+Why the bass-leaning target: a mild downward (bass-forward) balance is the accepted music/room
+target preference (~1 dB/oct down) and iZotope Tonal Balance Control ships a "Bass Heavy" curve.
+Honesty note: Schedin's DiVA thesis *Target Spectrums For Mastering* (Luleå, 2021) only shows rock
+vs vocal-electronic differ *in the low end* — it does **not** recommend a bass-leaning rock target.
 
-Full per-profile basis, gear and chain live in `scripts/profiles.py` (`show <name>`).
-
-### What is actually documented about each archetype (sourced 2026-10-11)
-- **Bob Ludwig / Gateway** (Portland ME 1992–2023, now retired; 13 Grammys; **AES Gold Medal 2015**; MFiT
-  consultant; 7,892 Discogs credits). Credits: Led Zeppelin, Queen, Metallica, Springsteen, Nirvana,
-  Radiohead, Tool, Daft Punk. **Signature:** translation-first, dynamic preservation, immaculate low end,
-  no over-limiting.
-- **Ted Jensen / Sterling** (since 1975; Chief ME 1984; 16 Grammy-winning albums; built the first
-  all-digital mastering console, **Neve DTC-1**; Apple MFiT consultant). Credits: Eagles *Hotel California*,
-  Green Day *American Idiot*, Alice in Chains (*The Devil Put Dinosaurs Here* — BEA nom 2014).
-  **Signature:** precision, clarity, loud-but-controlled, mid-forward.
-- **Joe LaPorta / Sterling** (since 2013; **Grammy BEA 2017 *Blackstar***; ROTY 2024 *Flowers*).
-  Credits: Bowie, Foo Fighters, The Weeknd, Imagine Dragons, Miley Cyrus, The Marías.
-  **Signature:** punchy, streaming-ready, wide-but-mono-safe.
-- **Brad Boatright / Audiosiege** (Portland). **Published gear:** Manley Massive Passive ME, Dangerous
-  Bax, custom Sontec/Massenburg **DR-MQ5**, Dave Hill Titan, Foote P3EX, Rocksonics MB-3X ×2, Aphex
-  Dominator II ×2, Louder Than Liftoff Silver Bullet, custom **"Massive Aggressor"** diode saturator;
-  JBL LSR6332 + sub. **Signature:** saturated, dense, harmonic-rich, loud (punk/hardcore/metal).
-- **Jens Bogren / Fascination Street** (Örebro). Producer-mixer-master; stated philosophy *"warmth of
-  analog with the precision of digital … organic, clear, full of life"*; Holonor-designed room.
-  **Signature:** organic + clear, powerful, tight, modern metal.
-- **John Golden / Golden Mastering** (Ventura, est. 1993; family-run; Neumann VMS-70 lathe).
-  **Signature:** organic warmth, weight, keeps dynamics; indie/garage/underground + vinyl.
-- **Joe Lambert / Joe Lambert Mastering** (Westchester NY). **Published gear:** Maselec MTC-1X + MLA-4 +
-  2012 limiter, Manley Massive Passive + Variable Mu, Weiss EQ1, Sontec MES-431C, Anamod tape sim;
-  KEF 207.2 full-range. Apple Digital Masters approved. **Signature:** weighted low end + guitar presence,
-  analog, headroom-first (*"leave headroom … not necessary to make your mixes loud"*). *(Note: "Truphonic"
-  is Vlado Meller's studio — not Lambert's.)*
-- **Dream Theater / prog-metal** — *A View from the Top of the World* (2021) was **mixed AND mastered by
-  Andy Sneap**; *Dream Theater* (2013) was mixed by **Richard Chycki** on an SSL Duality (hybrid DAW+analog;
-  UAD SSL 4000, Sonnox Oxford EQ as his "workhorse"). Chycki's documented DT technique: guitars split via a
-  Radial JD7 into multiple mics, **Petrucci doubles everything, 3–12 guitar tracks/song + DI**; **40+ mics**
-  on the kit with phase/leakage control so it reads as *one* instrument; priority = **separation + clarity
-  inside density + power**; monitors under 90 dB. This is the model for the `prog-metal` profile.
-
-**Method: extrapolating data from written analyses (no audio needed).** Published credits + studio gear
-lists + engineer interviews + stated philosophy give real, citable inputs — enough to set module *direction*
-and genre doctrine even without reference audio. What it does NOT give is *measured* target curves; those
-still need reference audio (see the calibration note below). Do not present extrapolated numbers as measured.
-
-**Module settings are per-profile.** `master.py` now accepts stage knobs, and `profiles.py` carries them:
-`--comp-ratio/--comp-attack/--comp-release/--comp-gr` (glue comp), `--color-drive/--color-mix` (saturation),
-`--deess-f0/--deess-range`, `--clip`. Genre doctrine encoded: **metal/prog-metal → minimal comp, long
-attack / short release (50 ms / 120 ms), less saturation on already-distorted material**; **indie/organic →
-heavier glue, fast attack / slow release (5 ms / 400 ms), more colour**; pop/rock in between.
+Run it with no flags (the defaults are the profile) or say `--profile modern-rock` for the same
+result; any explicit flag overrides the corresponding default. `python3 scripts/profiles.py list`
+prints it.
 
 ## Environment
 

@@ -279,6 +279,13 @@ def main():
         y = process(y, sr, mono_f, width, sidehpf)
         mode = f"sidehpf<{sidehpf:g}Hz" if sidehpf > 0 else (f"mono<{mono_f:g}Hz" if mono_f > 0 else "width only")
         print(f"stereo: {mode} width={width}")
+    # Final DC guard: an asymmetric saturating stage can leave a small DC term on the whole render.
+    # The known source (translate's tube ghost) is fixed at the stage; this keeps any future leak out
+    # of the delivery and out of the makeup/limiter maths.
+    _dc = y.mean(axis=0)
+    if float(np.abs(_dc).max()) > 1e-4:
+        y = y - _dc
+        print(f"dc-guard: DC {['%+.6f' % d for d in _dc]} removed before makeup/limit")
     m0 = full_measure(y, sr)
     print(f"before: LUFS-I {m0['lufs']} TP {m0['tp']}dBTP crest {m0['crest']}dB")
     step = max(min(want - (lufs_integrated(y, sr)), 12.0), -12.0)

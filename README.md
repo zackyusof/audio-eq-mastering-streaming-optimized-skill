@@ -20,7 +20,7 @@ stand alone anywhere Python runs. **28 scripts**, one entry point (`master.py`).
 | **Spatial** | `mid_side.py` (true M/S EQ + width + mono-below), `stereo_tool.py` (mono lows / side-HPF + width + mono check), `translate.py` (low-end translation) |
 | **Level & output** | `limiter.py` (lookahead brickwall), `lufs_meter.py` (BS.1770), `dither.py` (TPDF, CD only), `lead_in.py` (2-second delivery lead), `export_mp3.py` (320k VBR + Xing + ID3v2.3), `xing_header.py` (repair VBR headers) |
 | **QC & repair** | `qc_report.py` (delivery QC + streaming forecast), `codec_check.py` (AAC/MP3 lossy gate), `dehum.py` (DC + mains-hum notch), `spectral_repair.py` (short clicks/pops and bounded peak smoothing) |
-| **Profiles** | `profiles.py` (named presets — `gateway`, `sterling`, `laporta`, `audiosiege`, `bogren`, `prog-metal`, `golden`, `lambert`, `modern-rock`, `pop`, `metal`; per-profile module knobs; `guide` shows pick-by-genre) | `master.py --profile <name>` / `master.py --list-profiles`; explicit flags override |
+| **Profile** | `profiles.py` — ONE profile: the house default (`modern-rock`, −14.0 LUFS-I / −1.0 dBTP / −2.1 dB/oct). No engineer-derived presets, no selection | run the default pipeline; `--profile modern-rock` is identical; explicit flags override |
 
 ## Requirements
 
