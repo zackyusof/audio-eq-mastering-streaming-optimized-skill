@@ -151,7 +151,7 @@ still need reference audio (see the calibration note below). Do not present extr
 attack / short release (50 ms / 120 ms), less saturation on already-distorted material**; **indie/organic →
 heavier glue, fast attack / slow release (5 ms / 400 ms), more colour**; pop/rock in between.
 
-## Environment (verified 2026-10-10 on opencode-bart)
+## Environment
 
 - macOS `afinfo` / `afconvert` for format probe + compressed-to-WAV conversion
 - Python stdlib `wave` + `numpy` + `scipy` (NO librosa/matplotlib/ffmpeg — do not assume them; `pip install` only if the task needs spectrogram images)
